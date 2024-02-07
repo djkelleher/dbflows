@@ -1,0 +1,43 @@
+[project]
+name = "dbgress"
+version = "0.1.2"
+description = ""
+authors = [{ name = "Dan Kelleher", email = "kelleherjdan@gmail.com" }]
+license = { text = "MIT" }
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "file_flows>=0.1.5",
+    "sqlalchemy>=2.0.0",
+    "quicklogs",
+    "dynamic-imports",
+    "click",
+    "xxhash",
+    "tqdm",
+    "pydantic>=2.0.0",
+    "cytoolz",
+]
+
+[project.optional-dependencies]
+drivers = ["psycopg[c]", "asyncpg"]
+transfer = ["connectorx", "pandas"]
+all = ["drivers", "transfer"]
+dev = ["black", "pytest", "pytest-asyncio", "faker", "python-dotenv"]
+
+
+[tool.setuptools]
+packages = ["dbgress"]
+
+[project.scripts]
+db = "dbgress.cli:cli"
+
+[build-system]
+requires = ["setuptools>=43.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
