@@ -1,7 +1,7 @@
 [project]
 name = "dbgress"
 version = "0.1.2"
-description = ""
+description = "Database incremental exports, transfers, imports, ETL, creation / management"
 authors = [{ name = "Dan Kelleher", email = "kelleherjdan@gmail.com" }]
 license = { text = "MIT" }
 readme = "README.md"
