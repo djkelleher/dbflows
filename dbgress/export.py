@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from typing import Optional, Sequence, Union
 
 import sqlalchemy as sa
-from file_flows import FileOps
+from fileflows import Files
 from sqlalchemy.engine import Engine
 
 from .meta import ExportMeta, create_export_meta
@@ -22,7 +22,7 @@ def export_table(
     file_max_size: Optional[str] = None,
     file_stem_prefix: Optional[str] = None,
     n_workers: Optional[int] = None,
-    fo: Optional[FileOps] = None,
+    fo: Optional[Files] = None,
 ):
     """Export a database table.
 
@@ -35,7 +35,7 @@ def export_table(
         file_max_size (Optional[str], optional): Desired size of export files. Must have suffix 'bytes', 'kb', 'mb', 'gb', 'tb'. (e.g. '500mb'). If None, no limit will be placed on file size. Defaults to None.
         file_stem_prefix (Optional[str], optional): A prefix put on every export file name. Defaults to None.
         n_workers (Optional[int], optional): Number of export tasks to run simultaneously.
-        fo (Optional[FileOps], optional): File operations interface for s3/local disk.
+        fo (Optional[Files], optional): File operations interface for s3/local disk.
     """
     exports_meta = create_export_meta(
         table=table,
@@ -63,7 +63,7 @@ def export_hypertable_chunks(
     table: Union[sa.Table, str],
     save_locs: Union[Union[Path, str], Sequence[Union[Path, str]]],
     n_workers: Optional[int] = None,
-    fo: Optional[FileOps] = None,
+    fo: Optional[Files] = None,
 ):
     """Export all chunks of a TimescaleDB hypertable. (one file per chunk)
 
@@ -72,7 +72,7 @@ def export_hypertable_chunks(
         table (Union[sa.Table, str]): The table or schema-qualified table name to export data from.
         save_locs (Union[Union[Path, str], Sequence[Union[Path, str]]]): Bucket(s) (format: s3://{bucket name}) and/or local director(y|ies) to save files to.
         n_workers (Optional[int], optional): Number of export tasks to run simultaneously. Defaults to None.
-        fo (Optional[FileOps], optional): File operations interface for s3/local disk. Defaults to None.
+        fo (Optional[Files], optional): File operations interface for s3/local disk. Defaults to None.
     """
     if isinstance(engine, str):
         engine = sa.create_engine(engine)
@@ -103,10 +103,10 @@ def export(
     engine: Engine,
     append: bool,
     save_locs: Union[Union[Path, str], Sequence[Union[Path, str]]],
-    fo: Optional[FileOps] = None,
+    fo: Optional[Files] = None,
 ):
     """Export data as specified in `meta`."""
-    fo = fo or FileOps()
+    fo = fo or Files()
     save_locs = [save_locs] if isinstance(save_locs, (str, Path)) else save_locs
     primary_save_loc, *backup_save_locs = save_locs
     for loc in save_locs:
@@ -168,7 +168,7 @@ def export_all(
     append: bool,
     save_locs: Union[Union[Path, str], Sequence[Union[Path, str]]],
     n_workers: Optional[int] = None,
-    fo: Optional[FileOps] = None,
+    fo: Optional[Files] = None,
 ):
     """Export a data file for each `ExportMeta` in `exports`."""
     if n_workers is None:

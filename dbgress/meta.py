@@ -10,7 +10,7 @@ from typing import ClassVar, List, Optional, Sequence, Union
 
 import pandas as pd
 import sqlalchemy as sa
-from file_flows import FileOps
+from fileflows import Files
 from sqlalchemy import func as fn
 from sqlalchemy.engine import Engine
 from tqdm import tqdm
@@ -115,8 +115,8 @@ class ExportMeta:
         if self.slice_start or self.slice_end:
             if not (self.slice_start and self.slice_end):
                 raise ValueError("Both slice_start and slice_end are required.")
-            if isinstance(self.slice_start, (datetime,date)):
-                assert isinstance(self.slice_end, (datetime,date))
+            if isinstance(self.slice_start, (datetime, date)):
+                assert isinstance(self.slice_end, (datetime, date))
                 stem_parts.append(
                     f"{self.slice_start.isoformat()}_{self.slice_end.isoformat()}"
                 )
@@ -234,7 +234,7 @@ def create_export_meta(
     partition_column: Optional[Union[str, sa.Column]] = None,
     file_max_size: Optional[str] = None,
     file_stem_prefix: Optional[str] = None,
-    fo: Optional[FileOps] = None,
+    fo: Optional[Files] = None,
 ) -> List[ExportMeta]:
     """Export data from a database table.
 
@@ -270,7 +270,7 @@ def create_export_meta(
 
     if not isinstance(save_locs, (list, tuple, set)):
         save_locs = [save_locs]
-    fo = fo or FileOps()
+    fo = fo or Files()
     # make sure columns are SQLAlchemy columns.
     if isinstance(slice_column, str):
         slice_column = table.columns[slice_column]

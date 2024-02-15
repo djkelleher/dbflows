@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import sqlalchemy as sa
 from faker import Faker
-from file_flows import FileOps, S3Cfg
+from fileflows import Files, S3Cfg
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -102,8 +102,8 @@ def random_hyphen_name(faker) -> str:
 
 
 @pytest.fixture
-def file_ops(request) -> FileOps:
-    return FileOps(
+def file_ops(request) -> Files:
+    return Files(
         s3_cfg=S3Cfg(
             s3_endpoint_url=request.config.getoption("--minio-endpoint"),
             aws_access_key_id=request.config.getoption("--minio-user"),
