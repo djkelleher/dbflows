@@ -1,6 +1,6 @@
 [project]
 name = "dbgress"
-version = "0.1.2"
+version = "0.1.3"
 description = ""
 authors = [{ name = "Dan Kelleher", email = "kelleherjdan@gmail.com" }]
 license = { text = "MIT" }
@@ -14,7 +14,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "file_flows>=0.1.5",
+    "fileflows",
     "sqlalchemy>=2.0.0",
     "quicklogs",
     "dynamic-imports",
