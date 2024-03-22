@@ -18,8 +18,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.ext.asyncio.engine import AsyncEngine
 
-from dbgress.meta import ExportMeta
-from dbgress.utils import schema_table
+from dbflows.meta import ExportMeta
+from dbflows.utils import schema_table
 
 
 def pytest_addoption(parser):

@@ -16,8 +16,8 @@ services:
       - 9000:9000
       - 9001:9001
     command: server /data --console-address ":9001"
-  dbgress_dev:
-    container_name: dbgress_dev
+  dbflows_dev:
+    container_name: dbflows_dev
     build:
       context: ..
       dockerfile: tests/Dockerfile
@@ -25,7 +25,7 @@ services:
       - postgres
       - minio
     volumes:
-      - ..:/opt/dbgress
+      - ..:/opt/dbflows
     init: true
     tty: true
     command: bash

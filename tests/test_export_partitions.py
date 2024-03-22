@@ -2,8 +2,8 @@ import pandas as pd
 import pytest
 import sqlalchemy as sa
 
-from dbgress.export import export_table
-from dbgress.meta import ExportMeta
+from dbflows.export import export_table
+from dbflows.meta import ExportMeta
 
 
 @pytest.mark.parametrize("primary_save_loc", ["s3", "disk"])
@@ -62,10 +62,12 @@ def test_export_partitions(
                     partition_file,
                     names=[c.name for c in table.columns],
                     parse_dates=["datetime"],
-                    date_format='ISO8601',
-                    storage_options=file_ops.s3.storage_options
-                    if file_ops.s3.is_s3_path(partition_file)
-                    else None,
+                    date_format="ISO8601",
+                    storage_options=(
+                        file_ops.s3.storage_options
+                        if file_ops.s3.is_s3_path(partition_file)
+                        else None
+                    ),
                 ).astype(db_df.dtypes)
                 # sort for comparisons.
                 file_df.sort_values(

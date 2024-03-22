@@ -4,7 +4,17 @@ import pickle
 from collections import deque
 from logging import Logger
 from operator import itemgetter
-from typing import Any, Callable, Dict, List, Optional, TypeVar, Union, get_type_hints
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    TypeVar,
+    Union,
+    get_type_hints,
+)
 from uuid import uuid4
 
 import sqlalchemy as sa
@@ -18,12 +28,23 @@ from sqlalchemy.ext.asyncio.engine import AsyncEngine
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 from xxhash import xxh128
 
-from dbgress.components import async_create_table
+from dbflows.components import async_create_table
 
 from .utils import to_table
 
 # To be used as a type annotation on the columns that should not be used in the generation of row data IDs.
 DataIDIgnore = TypeVar("DataIDIgnore")
+
+
+async def load(
+    table: Union[sa.Table, DeclarativeMeta],
+    engine: Union[str, AsyncEngine],
+    rows: List[Dict[str, Any]],
+    *args,
+    **kwargs,
+):
+    loader = await Loader.create(table=table, engine=engine, *args, **kwargs)
+    await loader.load(rows=rows)
 
 
 class Loader:
@@ -34,7 +55,7 @@ class Loader:
         engine: Union[str, AsyncEngine],
         on_duplicate_key_update: Optional[Union[bool, List[str]]] = True,
         row_batch_size: int = 1500,
-        remove_duplicate_key_rows: bool = False,
+        duplicate_key_rows_keep: Optional[Literal["first", "last"]] = None,
         remove_rows_missing_key: bool = False,
         column_name_map: Optional[Dict[str, str]] = None,
         column_names_converter: Callable[[str], str] = None,
@@ -57,7 +78,7 @@ class Loader:
             column_name_map (Optional[Dict[str, str]], optional): Map column name to desired column name. Defaults to None.
             column_names_converter (Callable[[str], str], optional): A formatting function to apply to every name. Defaults to None.
             column_name_converters (Optional[Dict[str, Callable[[str], str]]], optional): A formatting function to apply to every name. Defaults to None.
-            remove_duplicate_key_rows (bool, optional): Remove duplicates from upsert batches. Last instance of row will be kept. Defaults to False.
+            duplicate_key_rows_keep (bool, optional): Remove duplicates from upsert batches. Last instance of row will be kept. Defaults to False.
             remove_rows_missing_key (bool, optional): _description_. Defaults to True.
             column_to_value (Optional[Dict[str, Any]], optional): Map column name to desired column value. Defaults to None.
             column_value_converters (Optional[Dict[str, Callable[[Any], Any]]], optional): Map column name to column value conversion function. Defaults to None.
@@ -75,7 +96,7 @@ class Loader:
         self.group_by_columns_present = group_by_columns_present
         self.max_conn = max_conn
         self.logger = logger or get_logger(f"{self.table.name}-loader")
-        self.remove_duplicate_key_rows = remove_duplicate_key_rows
+        self.duplicate_key_rows_keep = duplicate_key_rows_keep
         self._primary_key_column_names = _primary_key_column_names = {
             c.name for c in self.table.primary_key.columns
         }
@@ -83,7 +104,7 @@ class Loader:
             # not applicable because there are no keys.
             remove_rows_missing_key = False
             self.on_duplicate_key_update = None
-            self.remove_duplicate_key_rows = False
+            self.duplicate_key_rows_keep = None
 
         self._filters = []
         # do column name filtering first, so other functions will use the filtered names.
@@ -115,8 +136,8 @@ class Loader:
 
             self._filters.append(apply_remove_rows_missing_key)
 
-        if self.remove_duplicate_key_rows:
-            self._filters.append(self._apply_remove_duplicate_key_rows)
+        if self.duplicate_key_rows_keep:
+            self._filters.append(self._apply_duplicate_key_rows_keep)
 
         if value_map:
 
@@ -160,6 +181,7 @@ class Loader:
                 if not col.primary_key
             ]
         if self.on_duplicate_key_update:
+            # update provided columns.
             self._build_statement = self._upsert_update_statement
         elif self.on_duplicate_key_update == False:
             self._build_statement = self._upsert_ignore_statement
@@ -226,11 +248,11 @@ class Loader:
                 await conn.execute(self._build_statement(rows))
             except IntegrityError as ie:
                 if (
-                    not self.remove_duplicate_key_rows
+                    not self.duplicate_key_rows_keep
                     and "duplicate key value violates unique constraint"
                     in ie._message()
                 ):
-                    batches.append(self._apply_remove_duplicate_key_rows(rows))
+                    batches.append(self._apply_duplicate_key_rows_keep(rows))
                 else:
                     raise ie
 
@@ -263,8 +285,9 @@ class Loader:
                 break
         return rows
 
-    def _apply_remove_duplicate_key_rows(
-        self, rows: List[Dict[str, Any]]
+    def _apply_duplicate_key_rows_keep(
+        self,
+        rows: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         """Remove rows that repeat a primary key.
         Multiple row in the same upsert statement can not have the same primary key.
@@ -275,6 +298,8 @@ class Loader:
         Returns:
             List[Dict[str, Any]]: Duplicate-free data rows.
         """
+        if self.duplicate_key_rows_keep == "first":
+            rows = reversed(rows)
         unique_key_rows = {
             tuple([row[c] for c in self._primary_key_column_names]): row for row in rows
         }
@@ -309,8 +334,9 @@ class Loader:
         """
 
         # check column of first row (all rows should have same columns)
+        sample_row = rows[0]
         on_duplicate_key_update = [
-            c for c in self.on_duplicate_key_update if c in rows[0]
+            c for c in self.on_duplicate_key_update if c in sample_row
         ]
         if len(on_duplicate_key_update):
             statement = postgresql.insert(self.table).values(rows)

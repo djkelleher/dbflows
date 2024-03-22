@@ -6,7 +6,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import CompileError
 
-from dbgress.load import Loader, groupby_columns
+from dbflows.load import Loader, groupby_columns
 
 
 def row_count_query(single_column_table):

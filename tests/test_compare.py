@@ -5,7 +5,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-from dbgress.compare import (
+from dbflows.compare import (
     column_name_mismatch,
     column_type_mismatch,
     foreign_key_mismatch,

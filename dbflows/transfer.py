@@ -2,7 +2,7 @@ try:
     import connectorx as cx
     import pandas as pd
 except ImportError:
-    raise ImportError("Must install dbgress[transfer] to use transfer functions.")
+    raise ImportError("Must install dbflows[transfer] to use transfer functions.")
 
 import os
 import re
@@ -17,7 +17,7 @@ from quicklogs import get_logger
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 from tqdm import tqdm
 
-from dbgress.components import create_table
+from dbflows.components import create_table
 
 from .meta import create_export_meta
 from .utils import engine_url, query_str, remove_engine_driver, split_schema_table

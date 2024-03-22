@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 import sqlalchemy as sa
 
-from dbgress.transfer import DFFilter, copy_table_data
+from dbflows.transfer import DFFilter, copy_table_data
 
 
 def data_col_cvt(col: pd.Series) -> pd.Series:

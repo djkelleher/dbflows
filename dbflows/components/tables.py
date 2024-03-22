@@ -1,15 +1,17 @@
 import re
 from enum import EnumMeta
-from typing import List, Optional, Union
+from types import ModuleType
+from typing import List, Optional, Sequence, Union
 
 import sqlalchemy as sa
+from dynamic_imports import class_inst
 from sqlalchemy import func as fn
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio.engine import AsyncEngine
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 
-from dbgress.utils import logger, schema_table, to_table
+from dbflows.utils import logger, schema_table, to_table
 
 from .base import DbObj
 
@@ -19,6 +21,12 @@ tables_table = sa.Table(
     sa.Column("table_schema", sa.Text),
     sa.Column("table_name", sa.Text),
 )
+
+
+def format_table_name(name: str) -> str:
+    table = re.sub(r"\s+", "_", name)
+    table = re.sub(r"^[0-9]", lambda m: "_" + m.group(), table)
+    return table
 
 
 # TODO HypterTable class?
@@ -70,55 +78,59 @@ class Table(DbObj):
 
 def create_table(
     conn,
-    create_from: Union[sa.Table, DeclarativeMeta],
+    create_from: Union[sa.Table, DeclarativeMeta, ModuleType, Sequence],
     recreate: bool = False,
-) -> bool:
+):
     """Create a table in the database.
 
     Args:
         conn (Connection): Connection to use for executing SQL statements.
-        create_from (Union[sa.Table, DeclarativeMeta]): The entity or table object to create a database table for.
+        create_from (Union[sa.Table, Sequence[sa.Table], ModuleType]): The entity or table object to create a database table for.
         recreate (bool): If table exists, drop it and recreate. Defaults to False.
-
-    Returns:
-        bool: True if a table was created, else False.
     """
-    table = to_table(create_from)
-    schema = table.schema or "public"
+    if isinstance(create_from, (sa.Table, DeclarativeMeta)):
+        tables = [create_from]
+    elif not isinstance(create_from, (list, tuple)):
+        tables = class_inst(class_type=sa.Table, search_in=create_from)
+        tables += class_inst(class_type=DeclarativeMeta, search_in=create_from)
+    else:
+        tables = create_from
+    for table in tables:
+        table = to_table(create_from)
+        schema = table.schema or "public"
+        # create schema if needed.
+        if not conn.dialect.has_schema(conn, schema=schema):
+            logger.info("Creating schema '%s'", schema)
+            conn.execute(sa.schema.CreateSchema(schema))
+        table_name = table.name
+        # check if table exists.
+        if conn.dialect.has_table(conn, table_name=table_name, schema=schema):
+            if not recreate:
+                continue
+            logger.info("Dropping table %s.%s", schema, table)
+            conn.execute(sa.text(f'DROP TABLE {schema}."{table_name}" CASCADE'))
+            # table.drop(conn)
+        # create enum types if they do not already exist in the database.
+        # this is necessary because sa.Table.create has no way to handle columns that have an enum type that already exists in the Database.
+        enums = [
+            col.type
+            for col in table.columns.values()
+            if isinstance(col.type, (postgresql.ENUM, EnumMeta))
+        ]
+        for enum in enums:
+            # check if enum type exists, create it if it doesn't.
+            enum.create(conn, checkfirst=True)
+            # prevent table.create for attempting to create the enum type.
+            enum.create_type = False
 
-    # create schema if needed.
-    if not conn.dialect.has_schema(conn, schema=schema):
-        logger.info("Creating schema '%s'", schema)
-        conn.execute(sa.schema.CreateSchema(schema))
-    table_name = table.name
-    # check if table exists.
-    if conn.dialect.has_table(conn, table_name=table_name, schema=schema):
-        if not recreate:
-            return False
-        logger.info("Dropping table %s.%s", schema, table)
-        table.drop(conn)
-    # create enum types if they do not already exist in the database.
-    # this is necessary because sa.Table.create has no way to handle columns that have an enum type that already exists in the Database.
-    enums = [
-        col.type
-        for col in table.columns.values()
-        if isinstance(col.type, (postgresql.ENUM, EnumMeta))
-    ]
-    for enum in enums:
-        # check if enum type exists, create it if it doesn't.
-        enum.create(conn, checkfirst=True)
-        # prevent table.create for attempting to create the enum type.
-        enum.create_type = False
-
-    logger.info("Creating table %s.%s", schema, table)
-    table.create(conn)
-    # create hypertable if needed.
-    create_hypertable(conn, table)
-    return True
+        logger.info("Creating table %s.%s", schema, table)
+        table.create(conn)
+        # create hypertable if needed.
+        create_hypertable(conn, table)
 
 
 async def async_create_table(
-    create_from: Union[sa.Table, DeclarativeMeta],
+    create_from: Union[sa.Table, DeclarativeMeta, ModuleType, Sequence],
     engine: AsyncEngine,
     recreate: bool = False,
 ):

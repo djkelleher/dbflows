@@ -1,7 +1,8 @@
 from uuid import uuid4
 
 import pytest
-from dbgress.load import Loader
+
+from dbflows.load import Loader
 
 
 @pytest.fixture

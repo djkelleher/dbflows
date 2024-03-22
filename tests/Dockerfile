@@ -3,7 +3,7 @@ FROM mambaorg/micromamba:jammy
 # mambaorg/micromamba defaults to a non-root user.
 USER root
 
-ENV PROJ_DIR="/opt/dbgress"
+ENV PROJ_DIR="/opt/dbflows"
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
     apt-get install -y --no-install-recommends \

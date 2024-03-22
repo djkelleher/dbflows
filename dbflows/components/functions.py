@@ -4,7 +4,7 @@ import sqlalchemy as sa
 from sqlalchemy import func as fn
 from sqlalchemy.engine import Compiled, Engine
 
-from dbgress.utils import execute_sql, logger
+from dbflows.utils import execute_sql, logger
 
 from .base import DbObj
 from .schedule import SchedJob
@@ -75,9 +75,11 @@ class Procedure(DbObj):
             self.statement = [self.statement]
         with engine.begin() as conn:
             bodies = [
-                statement.compile(conn, compile_kwargs={"literal_binds": True})
-                if not isinstance(statement, (str, Compiled))
-                else statement
+                (
+                    statement.compile(conn, compile_kwargs={"literal_binds": True})
+                    if not isinstance(statement, (str, Compiled))
+                    else statement
+                )
                 for statement in self.statement
             ]
 

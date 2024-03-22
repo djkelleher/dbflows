@@ -29,4 +29,4 @@ files = [
 if __name__ == "__main__":
     while True:
         for file in files:
-            pytest.main([f"/opt/dbgress/tests/{file}"] + args)
+            pytest.main([f"/opt/dbflows/tests/{file}"] + args)

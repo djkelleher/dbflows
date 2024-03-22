@@ -4,8 +4,8 @@ import pandas as pd
 import pytest
 import sqlalchemy as sa
 
-from dbgress.export import export_table
-from dbgress.meta import ExportMeta
+from dbflows.export import export_table
+from dbflows.meta import ExportMeta
 
 
 @pytest.mark.parametrize("primary_save_loc", ["s3", "disk"])
@@ -30,7 +30,7 @@ def test_export_partition_slices(
     save_locs = save_locations(primary_save_loc)
     slice_column = table.c.datetime
     file_max_size = "100 kB"
-    partitions = ['_'.join(faker.words(2, unique=True)) for _ in range(3)]
+    partitions = ["_".join(faker.words(2, unique=True)) for _ in range(3)]
     for _ in range(3):
         add_table_rows(table, 10_000, partitions)
         export_table(
@@ -80,10 +80,12 @@ def test_export_partition_slices(
                                 file,
                                 names=[c.name for c in table.columns],
                                 parse_dates=["datetime"],
-                                date_format='ISO8601',
-                                storage_options=file_ops.s3.storage_options
-                                if file_ops.s3.is_s3_path(file)
-                                else None,
+                                date_format="ISO8601",
+                                storage_options=(
+                                    file_ops.s3.storage_options
+                                    if file_ops.s3.is_s3_path(file)
+                                    else None
+                                ),
                             ).astype(db_partition_dfs[partition].dtypes),
                         ),
                     )

@@ -1,6 +1,6 @@
 [project]
-name = "dbgress"
-version = "0.1.4"
+name = "dbflows"
+version = "0.1.5"
 description = "Database incremental exports, transfers, imports, ETL, creation / management"
 authors = [{ name = "Dan Kelleher", email = "kelleherjdan@gmail.com" }]
 license = { text = "MIT" }
@@ -33,10 +33,10 @@ dev = ["black", "pytest", "pytest-asyncio", "faker", "python-dotenv"]
 
 
 [tool.setuptools]
-packages = ["dbgress"]
+packages = ["dbflows"]
 
 [project.scripts]
-db = "dbgress.cli:cli"
+db = "dbflows.cli:cli"
 
 [build-system]
 requires = ["setuptools>=43.0.0", "wheel"]

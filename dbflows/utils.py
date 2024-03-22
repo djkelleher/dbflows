@@ -2,16 +2,17 @@ import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from subprocess import run
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
 from pydantic import PostgresDsn, validate_call
 from quicklogs import get_logger
 from sqlalchemy.engine import Compiled, Engine
+from sqlalchemy.ext.asyncio.engine import AsyncEngine
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 
-logger = get_logger("dbgress", stdout=True)
+logger = get_logger("dbflows", stdout=True)
 
 TimeT = Union[int, float, datetime, date]
 
@@ -83,11 +84,6 @@ def next_time_occurrence(
     return now.replace(hour=hour, minute=minute, second=second, microsecond=0)
 
 
-def pg_tz(engine) -> str:
-    with engine.begin() as conn:
-        return conn.execute(sa.text("SELECT current_setting('TIMEZONE');")).scalar()
-
-
 def to_table(table: Union[sa.Table, DeclarativeMeta]) -> sa.Table:
     """Extract the SQLAlchemy table from an entity, or return the passed argument if argument is already a table.
 
@@ -119,7 +115,7 @@ def execute_sql(sql: Any, engine: Engine):
         return conn.execute(sql)
 
 
-def compile_sa(engine: Engine, statement: Any) -> str:
+def compile_sa_statement(engine: Engine, statement: Any) -> str:
     """Compile a SQLAlchemy statement and bind query parameters."""
     if isinstance(statement, (str, Compiled)):
         return statement
@@ -200,9 +196,13 @@ def engine_url(engine: Engine) -> str:
 
 
 @validate_call
-def parse_postgres_url(url: PostgresDsn) -> PostgresDsn:
+def parse_pg_url(url: PostgresDsn) -> PostgresDsn:
     """Validate and parse a Postgresql URL."""
     return url
+
+
+def pg_url_w_driver(driver: str, url: str) -> str:
+    return url.replace("postgresql://", f"postgresql+{driver}://")
 
 
 def range_slices(
@@ -227,6 +227,37 @@ def query_str(query: Any, engine: Engine) -> str:
         with engine.begin() as conn:
             query = query.compile(conn, compile_kwargs={"literal_binds": True})
     return re.sub(r"\s+", " ", str(query)).strip()
+
+
+def pg_tz(engine) -> str:
+    with engine.begin() as conn:
+        return conn.execute(sa.text("SELECT current_setting('TIMEZONE');")).scalar()
+
+
+async def set_pg_timezone(
+    pg_engine: AsyncEngine, database: str, timezone: str
+) -> ZoneInfo:
+    """Set the database timezone and return zoneinfo instance with that timezone."""
+    async with pg_engine.begin() as conn:
+        conn.execute(
+            sa.text(f"ALTER DATABASE {database} SET timezone TO '{timezone}';")
+        )
+    async with pg_engine.begin() as conn:
+        conn.execute(sa.text("SELECT pg_reload_conf();"))
+    async with pg_engine.begin() as conn:
+        db_timezone = conn.execute(
+            sa.text("SELECT current_setting('TIMEZONE');")
+        ).scalar()
+    if db_timezone != timezone:
+        raise RuntimeError(
+            f"Failed to set database timezone to {timezone}. (currently set to:{db_timezone})"
+        )
+    return ZoneInfo(db_timezone)
+
+
+def table_updatable_columns(table: sa.Table) -> Set[str]:
+    key_cols = list(table.primary_key.columns)
+    return {c.name for c in table.columns if c not in key_cols}
 
 
 def copy_to_csv(
@@ -263,3 +294,9 @@ def copy_to_csv(
         logger.error(err)
     if info := result.stdout:
         logger.debug(info)
+
+
+def duckdb_table_to_csv(conn, export_dir, table_name: str):
+    conn.sql(
+        f"COPY (SELECT * FROM {table_name} order by time desc) TO '{export_dir}/{table_name}.csv' (HEADER, DELIMITER ',');"
+    )

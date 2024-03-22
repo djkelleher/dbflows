@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Engine
 from sqlalchemy.sql.expression import cast
 
-from dbgress.utils import execute_sql, logger, schema_table
+from dbflows.utils import execute_sql, logger, schema_table
 
 from .base import DbObj, query_kwargs
 
@@ -257,9 +257,11 @@ class SchedJob(DbObj):
             "next_start",
         )
         return [
-            c
-            if type(c.type) != sa.DateTime
-            else fn.nullif(c, cast("'-infinity'", sa.DateTime)).label(c.name)
+            (
+                c
+                if type(c.type) != sa.DateTime
+                else fn.nullif(c, cast("'-infinity'", sa.DateTime)).label(c.name)
+            )
             for c in table.columns
             if c.name not in ignore_columns
         ]
