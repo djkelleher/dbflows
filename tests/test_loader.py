@@ -1,16 +1,15 @@
 from copy import deepcopy
 from random import randint
 from uuid import uuid4
-import asyncpg
 
+import asyncpg
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.exc import CompileError
-from sqlalchemy.dialects import postgresql
 from asyncpg.exceptions import CardinalityViolationError
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import CompileError
 
 from dbflows.load import PgLoader, groupby_columns
-from sqlalchemy.exc import CompileError
 
 
 def row_count_query(single_column_table):
@@ -20,7 +19,7 @@ def row_count_query(single_column_table):
 @pytest.mark.asyncio
 async def test_rows_load(key_value_table, random_str_rows, engine, temp_db):
     """Check that rows load to database."""
-    loader = await PgLoader.create(key_value_table, dsn=temp_db)
+    loader = await PgLoader.create(key_value_table, pg_url=temp_db)
     n_rows = randint(5, 20)
     await loader.load_rows(random_str_rows(key_value_table, n_rows))
     with engine.begin() as conn:
@@ -33,7 +32,7 @@ async def test_rows_load(key_value_table, random_str_rows, engine, temp_db):
 async def test_batches_load(key_value_table, random_str_rows, engine, temp_db):
     """Check that rows load to database."""
 
-    loader = await PgLoader.create(key_value_table, row_batch_size=5, dsn=temp_db)
+    loader = await PgLoader.create(key_value_table, row_batch_size=5, pg_url=temp_db)
     n_rows = randint(10, 20)
     await loader.load_rows(random_str_rows(key_value_table, n_rows))
     with engine.begin() as conn:
@@ -45,7 +44,7 @@ async def test_batches_load(key_value_table, random_str_rows, engine, temp_db):
 @pytest.mark.asyncio
 async def test_on_dupe_ignore(key_value_table, random_str_rows, engine, temp_db):
     loader = await PgLoader.create(
-        key_value_table, on_duplicate_key_update=False, dsn=temp_db
+        key_value_table, on_duplicate_key_update=False, pg_url=temp_db
     )
     n_rows = randint(10, 20)
     rows = random_str_rows(key_value_table, n_rows)
@@ -84,7 +83,7 @@ async def test_on_duplicate_key_update_column(
     key_multi_value_table, random_str_rows, engine, temp_db
 ):
     loader = await PgLoader.create(
-        key_multi_value_table, on_duplicate_key_update=["data1"], dsn=temp_db
+        key_multi_value_table, on_duplicate_key_update=["data1"], pg_url=temp_db
     )
 
     n_rows = randint(5, 20)
@@ -120,7 +119,7 @@ async def test_on_duplicate_key_update(
     key_multi_value_table, random_str_rows, temp_db, engine
 ):
     loader = await PgLoader.create(
-        key_multi_value_table, on_duplicate_key_update=True, dsn=temp_db
+        key_multi_value_table, on_duplicate_key_update=True, pg_url=temp_db
     )
 
     n_rows = randint(5, 20)
@@ -165,7 +164,7 @@ def test_group_by_columns():
 @pytest.mark.asyncio
 async def test_compile_error(key_multi_value_table, temp_db):
     loader = await PgLoader.create(
-        key_multi_value_table, group_by_columns_present=False, dsn=temp_db
+        key_multi_value_table, group_by_columns_present=False, pg_url=temp_db
     )
     rows = [
         {"key": str(uuid4()), "data1": str(uuid4()), "data2": str(uuid4())},
@@ -175,21 +174,24 @@ async def test_compile_error(key_multi_value_table, temp_db):
         CompileError,
         match="is explicitly rendered as a boundparameter in the VALUES clause",
     ):
-        loader._build_statement(rows).compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
+        loader._build_statement(rows).compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
 
 
 @pytest.mark.asyncio
 async def test_cardinality_violation_error(key_value_table, temp_db):
     loader = await PgLoader.create(
-        key_value_table, duplicate_key_rows_keep="first", dsn=temp_db
+        key_value_table, duplicate_key_rows_keep="first", pg_url=temp_db
     )
     key = str(uuid4())
-    first_value = str(uuid4())
     rows = [
-        {"key": key, "data": first_value},
+        {"key": key, "data": str(uuid4())},
         {"key": key, "data": str(uuid4())},
     ]
-    statement = loader._build_statement(rows).compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
+    statement = loader._build_statement(rows).compile(
+        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+    )
     conn = await asyncpg.connect(temp_db)
     with pytest.raises(
         CardinalityViolationError,
@@ -199,5 +201,40 @@ async def test_cardinality_violation_error(key_value_table, temp_db):
     await conn.close()
 
 
+@pytest.mark.asyncio
+async def test_fetch(key_multi_value_table, temp_db):
+    loader = await PgLoader.create(key_multi_value_table, pg_url=temp_db)
+    key1 = str(uuid4())
+    rows = [
+        {"key": key1, "data1": str(uuid4()), "data2": str(uuid4())},
+        {"key": str(uuid4()), "data1": str(uuid4()), "data2": str(uuid4())},
+    ]
+    await loader.load_rows(rows)
+    fetched_rows = await loader.fetch(sa.select(key_multi_value_table))
+    assert len(fetched_rows) == len(rows)
 
-    
+
+@pytest.mark.asyncio
+async def test_fetchrow(key_multi_value_table, temp_db):
+    loader = await PgLoader.create(key_multi_value_table, pg_url=temp_db)
+    key1 = str(uuid4())
+    rows = [
+        {"key": key1, "data1": str(uuid4()), "data2": str(uuid4())},
+        {"key": str(uuid4()), "data1": str(uuid4()), "data2": str(uuid4())},
+    ]
+    await loader.load_rows(rows)
+    fetched_row = await loader.fetchrow(sa.select(key_multi_value_table).where(key_multi_value_table.c.key == key1))
+    assert isinstance(fetched_row, asyncpg.Record)
+
+
+@pytest.mark.asyncio
+async def test_fetchval(key_multi_value_table, temp_db):
+    loader = await PgLoader.create(key_multi_value_table, pg_url=temp_db)
+    key1 = str(uuid4())
+    rows = [
+        {"key": key1, "data1": str(uuid4()), "data2": str(uuid4())},
+        {"key": str(uuid4()), "data1": str(uuid4()), "data2": str(uuid4())},
+    ]
+    await loader.load_rows(rows)
+    fetched_value = await loader.fetchval(sa.select(key_multi_value_table.c.data1).where(key_multi_value_table.c.key == key1))
+    assert isinstance(fetched_value, str)

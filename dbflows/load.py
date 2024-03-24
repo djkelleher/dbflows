@@ -4,8 +4,8 @@ from logging import Logger
 from typing import Any, Callable, Dict, List, Literal, Optional, Union
 
 import asyncpg
-from asyncpg.exceptions import CardinalityViolationError
 import sqlalchemy as sa
+from asyncpg.exceptions import CardinalityViolationError
 from cytoolz.itertoolz import groupby, partition_all
 from quicklogs import get_logger
 from sqlalchemy.dialects import postgresql
@@ -13,28 +13,28 @@ from sqlalchemy.dialects.postgresql.dml import Insert
 from sqlalchemy.exc import CompileError
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 
-from .utils import to_table
+from .utils import compile_sa_statement, to_table
 
 
 async def load_rows(
     table: Union[sa.Table, DeclarativeMeta],
-    dsn: str,
+    pg_url: str,
     rows: List[Dict[str, Any]],
     *args,
     **kwargs,
 ):
-    loader = await PgLoader.create(table=table, dsn=dsn, *args, **kwargs)
+    loader = await PgLoader.create(table=table, pg_url=pg_url, *args, **kwargs)
     await loader.load_rows(rows=rows)
 
 
 async def load_row(
     table: Union[sa.Table, DeclarativeMeta],
-    dsn: str,
+    pg_url: str,
     rows: Dict[str, Any],
     *args,
     **kwargs,
 ):
-    loader = await PgLoader.create(table=table, dsn=dsn, *args, **kwargs)
+    loader = await PgLoader.create(table=table, pg_url=pg_url, *args, **kwargs)
     await loader.load_row(rows=rows)
 
 
@@ -43,7 +43,7 @@ class PgLoader:
     async def create(
         cls,
         table: Union[sa.Table, DeclarativeMeta],
-        dsn: str,
+        pg_url: str,
         on_duplicate_key_update: Optional[Union[bool, List[str]]] = True,
         row_batch_size: int = 1500,
         duplicate_key_rows_keep: Optional[Literal["first", "last"]] = None,
@@ -81,7 +81,7 @@ class PgLoader:
         """
         self = cls()
         self.table = to_table(table)
-        self.pool = await asyncpg.create_pool(dsn=dsn)
+        self.pool = await asyncpg.create_pool(dsn=pg_url)
         self.row_batch_size = row_batch_size
         self.on_duplicate_key_update = on_duplicate_key_update
         self.group_by_columns_present = group_by_columns_present
@@ -183,7 +183,7 @@ class PgLoader:
                 f"Invalid argument for on_duplicate_key_update: {self.on_duplicate_key_update}"
             )
         # create table if it doesn't already exist.
-        #await async_create_table(create_from=self.table, engine=self.pool)
+        # await async_create_table(create_from=self.table, engine=self.pool)
         return self
 
     async def load_row(self, row: Dict[str, Any]):
@@ -216,7 +216,6 @@ class PgLoader:
                 asyncio.create_task(self._load(batch))
                 for batch in partition_all(self.row_batch_size, rows)
             ]
-        # TODO proper connection pool usage.
         for task in asyncio.as_completed(tasks):
             await task
             self.logger.info("Finished loading batch.")
@@ -239,16 +238,26 @@ class PgLoader:
                 break
         return rows
 
+    async def fetch(self, query: sa.Select) -> List[Any]:
+        async with self.pool.acquire() as conn:
+            return await conn.fetch(compile_sa_statement(query))
+
+    async def fetchrow(self, query: sa.Select) -> List[Any]:
+        async with self.pool.acquire() as conn:
+            return await conn.fetchrow(compile_sa_statement(query))
+
+    async def fetchval(self, query: sa.Select) -> List[Any]:
+        async with self.pool.acquire() as conn:
+            return await conn.fetchval(compile_sa_statement(query))
+
     async def _load(self, rows):
         async with self.pool.acquire() as conn:
             try:
-                statement = self._build_statement(rows).compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
-                await conn.execute(str(statement))
+                statement = compile_sa_statement(self._build_statement(rows))
+                await conn.execute(statement)
             except CardinalityViolationError as e1:
-                if (
-                    (self.duplicate_key_rows_keep is None)
-                    and ("command cannot affect row a second time"
-                    in e1._message())
+                if (self.duplicate_key_rows_keep is None) and (
+                    "command cannot affect row a second time" in e1._message()
                 ):
                     return await self._load(self._apply_duplicate_key_rows_keep(rows))
                 else:

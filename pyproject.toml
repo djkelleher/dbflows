@@ -1,6 +1,6 @@
 [project]
 name = "dbflows"
-version = "0.1.5"
+version = "0.1.6"
 description = "Database incremental exports, transfers, imports, ETL, creation / management"
 authors = [{ name = "Dan Kelleher", email = "kelleherjdan@gmail.com" }]
 license = { text = "MIT" }
@@ -23,13 +23,21 @@ dependencies = [
     "tqdm",
     "pydantic>=2.0.0",
     "cytoolz",
-    "connectorx", 
+    "connectorx",
     "pandas>=2.0.0",
-    "asyncpg"
+    "asyncpg",
 ]
 
 [project.optional-dependencies]
-dev = ["psycopg[binary]", "black", "pytest", "pytest-asyncio", "faker", "python-dotenv", "jupyter"]
+dev = [
+    "psycopg[binary]",
+    "black",
+    "pytest",
+    "pytest-asyncio",
+    "faker",
+    "python-dotenv",
+    "jupyter",
+]
 
 [tool.setuptools]
 packages = ["dbflows"]

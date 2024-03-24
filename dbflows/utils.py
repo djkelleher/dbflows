@@ -118,9 +118,11 @@ def execute_sql(sql: Any, engine: Engine):
 
 def compile_sa_statement(statement: Any) -> str:
     """Compile a SQLAlchemy statement and bind query parameters."""
-    if isinstance(statement, (str, Compiled)):
-        return statement
-    return statement.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
+    return str(
+        statement.compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
 
 
 def column_type_casts(

@@ -9,7 +9,7 @@ from dbflows.load import PgLoader
 def db_loader_creator(temp_db, single_column_table):
     async def _db_loader_creator(**kwargs):
         loader = await PgLoader.create(
-            table=single_column_table, dsn=temp_db, **kwargs
+            table=single_column_table, pg_url=temp_db, **kwargs
         )
         return loader
 
