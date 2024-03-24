@@ -18,25 +18,24 @@ dependencies = [
     "sqlalchemy>=2.0.0",
     "quicklogs",
     "dynamic-imports",
-    "click",
+    "asyncclick",
     "xxhash",
     "tqdm",
     "pydantic>=2.0.0",
     "cytoolz",
+    "connectorx", 
+    "pandas>=2.0.0",
+    "asyncpg"
 ]
 
 [project.optional-dependencies]
-drivers = ["psycopg[c]", "asyncpg"]
-transfer = ["connectorx", "pandas"]
-all = ["drivers", "transfer"]
-dev = ["black", "pytest", "pytest-asyncio", "faker", "python-dotenv"]
-
+dev = ["psycopg[binary]", "black", "pytest", "pytest-asyncio", "faker", "python-dotenv", "jupyter"]
 
 [tool.setuptools]
 packages = ["dbflows"]
 
 [project.scripts]
-db = "dbflows.cli:cli"
+dbflows = "dbflows.cli:run_cli"
 
 [build-system]
 requires = ["setuptools>=43.0.0", "wheel"]

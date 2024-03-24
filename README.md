@@ -8,11 +8,7 @@
 Currently only Postgresql and Postgresql-based databases (e.g. TimescaleDB) are supported.
 
 ## Install
-`pip install dbflows`   
-Optional extras: `pip install dbgrees[all]`   
-or select specific extras:
-- `transfer` - enable functionality for transferring data from one database to another.
-- `drivers` - install `psycopg[c]` and `asyncpg` database drivers (If the parent application installs it's own database driver, then you don't need this). For `psycopg[c]`, make sure you have `libpq-dev` installed (`sudo apt install libpq-dev`)       
+`pip install dbflows`     
 
 If using the export functionality (export database tables to compressed CSV files), then you will additionally need to have the `psql` executable available.
 To install `psql`:
@@ -108,9 +104,7 @@ export_table(
 
 # Loading/Importing
 ### Loading from Python objects
-Install a Postgresql driver in the parent application (e.g. [`psycopg[c]`](https://www.psycopg.org/) or [`asyncpg`](https://github.com/MagicStack/asyncpg).
-
-Create a [`Loader`](./dbflows/load.py#L30) instance for your table and use the [`load`](./dbflows/load.py#L175) method to load batches of rows.
+Create a [`PgLoader`](./dbflows/load.py#L30) instance for your table and use the [`load`](./dbflows/load.py#L175) method to load batches of rows.
 
 ### Loading from CSV files
 Use [import_csvs](./dbflows/files.py#L10) to load CSV with parallel worker threads. This internally uses [timescaledb-parallel-copy](https://docs.timescale.com/use-timescale/latest/ingest-data/about-timescaledb-parallel-copy/) which can be installed with: `go install github.com/timescale/timescaledb-parallel-copy/cmd/timescaledb-parallel-copy@latest`
