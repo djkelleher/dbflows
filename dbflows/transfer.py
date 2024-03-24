@@ -1,8 +1,6 @@
-try:
-    import connectorx as cx
-    import pandas as pd
-except ImportError:
-    raise ImportError("Must install dbflows[transfer] to use transfer functions.")
+
+import connectorx as cx
+import pandas as pd
 
 import os
 import re

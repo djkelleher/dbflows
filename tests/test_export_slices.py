@@ -4,6 +4,7 @@ import sqlalchemy as sa
 
 from dbflows.export import export_table
 from dbflows.meta import ExportMeta
+from fileflows.s3 import is_s3_path
 
 
 @pytest.mark.parametrize("primary_save_loc", ["s3", "disk"])
@@ -70,7 +71,7 @@ def test_export_slices(
                                 date_format="ISO8601",
                                 storage_options=(
                                     file_ops.s3.storage_options
-                                    if file_ops.s3.is_s3_path(file)
+                                    if is_s3_path(file)
                                     else None
                                 ),
                             ).astype(db_df.dtypes),

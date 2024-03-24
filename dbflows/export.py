@@ -8,6 +8,7 @@ from typing import Optional, Sequence, Union
 import sqlalchemy as sa
 from fileflows import Files
 from sqlalchemy.engine import Engine
+from fileflows.s3 import is_s3_path
 
 from .meta import ExportMeta, create_export_meta
 from .utils import copy_to_csv, logger, schema_table
@@ -118,14 +119,14 @@ def export(
     if meta.path:
         _, path_name = os.path.split(meta.path)
         # if appending to file and it's in s3, we need to move it to a local folder.
-        if fo.s3.is_s3_path(meta.path):
+        if is_s3_path(meta.path):
             save_path = f"{TemporaryDirectory().name}/{path_name}"
             fo.move(meta.path, save_path)
         else:
             # the file being appended to is already a local file.
             save_path = meta.path
     # if primary save location is s3, we need to save to a local file first, then move it.
-    elif fo.s3.is_s3_path(primary_save_loc):
+    elif is_s3_path(primary_save_loc):
         save_path = f"{TemporaryDirectory().name}/{created_file_name}"
     else:
         # primary save location is a local file, so save directly to primary location.

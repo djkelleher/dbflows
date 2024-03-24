@@ -4,7 +4,7 @@ from pathlib import Path
 from subprocess import run
 from typing import Sequence, Union
 
-from .utils import logger, parse_postgres_url, split_schema_table
+from .utils import logger, parse_pg_url, split_schema_table
 
 
 def import_csvs(
@@ -37,7 +37,7 @@ def import_csvs(
             files = list(files.rglob("*.csv"))
         else:
             files = list(files.glob("*.csv"))
-    url_parsed = parse_postgres_url(db_url)
+    url_parsed = parse_pg_url(db_url)
     # username, password, host, port
     conn_meta = url_parsed.hosts()
     conn_meta["user"] = conn_meta.pop("username")

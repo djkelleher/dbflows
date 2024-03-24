@@ -1,5 +1,7 @@
-import click
-from click import Group
+import os
+
+import asyncclick as click
+from asyncclick import Group
 
 cli = Group("db")
 
@@ -237,3 +239,38 @@ def _transfer(
         n_workers=n_workers,
         finished_tasks_file=finished_tasks_file,
     )
+
+
+@cli.command()
+@click.argument("search-in")
+@click.option(
+    "--pg-url",
+    "-c",
+    default=os.environ.get("POSTGRES_URL", ""),
+    help="URL of PostreSQL database to create tables in.",
+)
+@click.option(
+    "--recreate", "-r", default=False, help="Recreate tables that currently exist."
+)
+async def create_tables(search_in: str, pg_url: str, recreate: bool):
+    """Create all tables found in provided module or package path."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from dbflows import async_create_table
+    from dbflows.utils import pg_url_w_driver
+
+    engine = create_async_engine(pg_url_w_driver("asyncpg", pg_url))
+    click.echo(f"Searching for tables in {search_in}")
+    await async_create_table(
+        engine=engine,
+        create_from=search_in,
+        recreate=recreate,
+    )
+
+
+def run_cli():
+    cli(_anyio_backend="asyncio")
+
+
+if __name__ == "__main__":
+    run_cli()

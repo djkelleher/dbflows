@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import sqlalchemy as sa
 from pydantic import PostgresDsn, validate_call
 from quicklogs import get_logger
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Compiled, Engine
 from sqlalchemy.ext.asyncio.engine import AsyncEngine
 from sqlalchemy.orm.decl_api import DeclarativeMeta
@@ -115,12 +116,11 @@ def execute_sql(sql: Any, engine: Engine):
         return conn.execute(sql)
 
 
-def compile_sa_statement(engine: Engine, statement: Any) -> str:
+def compile_sa_statement(statement: Any) -> str:
     """Compile a SQLAlchemy statement and bind query parameters."""
     if isinstance(statement, (str, Compiled)):
         return statement
-    with engine.begin() as conn:
-        return statement.compile(conn, compile_kwargs={"literal_binds": True})
+    return statement.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
 
 
 def column_type_casts(

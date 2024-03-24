@@ -1,58 +1,49 @@
 import asyncio
 import os
-import pickle
-from collections import deque
 from logging import Logger
-from operator import itemgetter
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Literal,
-    Optional,
-    TypeVar,
-    Union,
-    get_type_hints,
-)
-from uuid import uuid4
+from typing import Any, Callable, Dict, List, Literal, Optional, Union
 
+import asyncpg
+from asyncpg.exceptions import CardinalityViolationError
 import sqlalchemy as sa
 from cytoolz.itertoolz import groupby, partition_all
 from quicklogs import get_logger
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql.dml import Insert
-from sqlalchemy.exc import CompileError, IntegrityError
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.ext.asyncio.engine import AsyncEngine
+from sqlalchemy.exc import CompileError
 from sqlalchemy.orm.decl_api import DeclarativeMeta
-from xxhash import xxh128
-
-from dbflows.components import async_create_table
 
 from .utils import to_table
 
-# To be used as a type annotation on the columns that should not be used in the generation of row data IDs.
-DataIDIgnore = TypeVar("DataIDIgnore")
 
-
-async def load(
+async def load_rows(
     table: Union[sa.Table, DeclarativeMeta],
-    engine: Union[str, AsyncEngine],
+    dsn: str,
     rows: List[Dict[str, Any]],
     *args,
     **kwargs,
 ):
-    loader = await Loader.create(table=table, engine=engine, *args, **kwargs)
-    await loader.load(rows=rows)
+    loader = await PgLoader.create(table=table, dsn=dsn, *args, **kwargs)
+    await loader.load_rows(rows=rows)
 
 
-class Loader:
+async def load_row(
+    table: Union[sa.Table, DeclarativeMeta],
+    dsn: str,
+    rows: Dict[str, Any],
+    *args,
+    **kwargs,
+):
+    loader = await PgLoader.create(table=table, dsn=dsn, *args, **kwargs)
+    await loader.load_row(rows=rows)
+
+
+class PgLoader:
     @classmethod
     async def create(
         cls,
         table: Union[sa.Table, DeclarativeMeta],
-        engine: Union[str, AsyncEngine],
+        dsn: str,
         on_duplicate_key_update: Optional[Union[bool, List[str]]] = True,
         row_batch_size: int = 1500,
         duplicate_key_rows_keep: Optional[Literal["first", "last"]] = None,
@@ -72,7 +63,7 @@ class Loader:
 
         Args:
             table (Union[sa.Table, DeclarativeMeta]): The SQLAlchemy table or entity corresponding to the database table that rows will be loaded to.
-            engine (Union[str, AsyncEngine]): The engine or connection string to the database.
+            dsn (str): The PostgreSQL dsn connection string to the database.
             on_duplicate_key_update (Union[bool, List[str]], optional): List of columns that should be updated when primary key exists, or True for all columns, False for no columns, None if duplicates should not be checked (i.e. a normal INSERT). Defaults to True.
             row_batch_size (int): Number of rows to load per statement. Defaults to 1500.
             column_name_map (Optional[Dict[str, str]], optional): Map column name to desired column name. Defaults to None.
@@ -90,7 +81,7 @@ class Loader:
         """
         self = cls()
         self.table = to_table(table)
-        self.engine = create_async_engine(engine) if isinstance(engine, str) else engine
+        self.pool = await asyncpg.create_pool(dsn=dsn)
         self.row_batch_size = row_batch_size
         self.on_duplicate_key_update = on_duplicate_key_update
         self.group_by_columns_present = group_by_columns_present
@@ -192,80 +183,43 @@ class Loader:
                 f"Invalid argument for on_duplicate_key_update: {self.on_duplicate_key_update}"
             )
         # create table if it doesn't already exist.
-        await async_create_table(create_from=self.table, engine=self.engine)
+        #await async_create_table(create_from=self.table, engine=self.pool)
+        return self
 
-    async def load(
-        self, rows: List[Dict[str, Any]], skip_filter: bool = False
-    ) -> List[Dict[str, Any]]:
+    async def load_row(self, row: Dict[str, Any]):
+        await self._load(row)
+
+    async def load_rows(self, rows: List[Dict[str, Any]]):
         """Load rows to the database.
 
         Args:
             rows (List[Dict[str, Any]]): Rows to that should be loaded.
-            skip_filter (bool): Don't filter rows. (e.g. set to True if filter_rows was already called outside of this function.)
         """
-        if not skip_filter:
-            if not (rows := self.filter_rows(rows)):
-                return []
-
-        row_groups = groupby_columns(rows) if self.group_by_columns_present else [rows]
-        batches = deque()
-        # split rows into smaller batches if there are too many to insert at once.
-        for rows in row_groups:
-            for batch in partition_all(self.row_batch_size, rows):
-                batches.append(batch)
-
+        rows = self.filter_rows(rows)
+        if not rows:
+            return []
         # upsert all batches.
         self.logger.info(
-            "Loading %i rows (%i batches) to the database.",
+            "Loading %i rows to the database.",
             len(rows),
-            len(batches),
         )
-        max_concurrent_tasks = min(self.max_conn, len(batches))
-        # start with the max number of concurrent tasks allowed.
-        tasks = [
-            asyncio.create_task(self._load_next_batch(batches))
-            for _ in range(max_concurrent_tasks)
-        ]
+        if self.group_by_columns_present:
+            row_groups = groupby_columns(rows)
+            # split rows into smaller batches if there are too many to insert at once.
+            tasks = [
+                asyncio.create_task(self._load(batch))
+                for rows in row_groups
+                for batch in partition_all(self.row_batch_size, rows)
+            ]
+        else:
+            tasks = [
+                asyncio.create_task(self._load(batch))
+                for batch in partition_all(self.row_batch_size, rows)
+            ]
         # TODO proper connection pool usage.
-        while len(tasks):
-            new_tasks = []
-            for task in asyncio.as_completed(tasks):
-                await task
-                self.logger.info("Finished loading batch.")
-                # every time a tasks completes, start another.
-                if len(batches):
-                    new_tasks.append(
-                        asyncio.create_task(self._load_next_batch(batches))
-                    )
-            tasks = new_tasks
-        return rows
-
-    async def _load_next_batch(self, batches):
-        rows = batches.popleft()
-        async with self.engine.begin() as conn:
-            self.logger.info("Loading %i rows to %s", len(rows), self.table.name)
-            try:
-                await conn.execute(self._build_statement(rows))
-            except IntegrityError as ie:
-                if (
-                    not self.duplicate_key_rows_keep
-                    and "duplicate key value violates unique constraint"
-                    in ie._message()
-                ):
-                    batches.append(self._apply_duplicate_key_rows_keep(rows))
-                else:
-                    raise ie
-
-            except CompileError as ce:
-                if (
-                    not self.group_by_columns_present
-                    and "is explicitly rendered as a boundparameter in the VALUES clause"
-                    in ce._message()
-                ):
-                    for rows in groupby_columns(rows):
-                        batches.append(rows)
-                else:
-                    raise ce
+        for task in asyncio.as_completed(tasks):
+            await task
+            self.logger.info("Finished loading batch.")
 
     def filter_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Apply all filter functions to rows.
@@ -284,6 +238,35 @@ class Loader:
                 )
                 break
         return rows
+
+    async def _load(self, rows):
+        async with self.pool.acquire() as conn:
+            try:
+                statement = self._build_statement(rows).compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
+                await conn.execute(str(statement))
+            except CardinalityViolationError as e1:
+                if (
+                    (self.duplicate_key_rows_keep is None)
+                    and ("command cannot affect row a second time"
+                    in e1._message())
+                ):
+                    return await self._load(self._apply_duplicate_key_rows_keep(rows))
+                else:
+                    raise e1
+            except CompileError as ce:
+                if (
+                    not self.group_by_columns_present
+                    and "is explicitly rendered as a boundparameter in the VALUES clause"
+                    in ce._message()
+                ):
+                    return await asyncio.gather(
+                        *[
+                            asyncio.create_task(self._load(rows))
+                            for rows in groupby_columns(rows)
+                        ]
+                    )
+                else:
+                    raise ce
 
     def _apply_duplicate_key_rows_keep(
         self,
@@ -441,79 +424,3 @@ def groupby_columns(rows: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
         List[List[Dict[str, Any]]]: The grouped rows.
     """
     return groupby(lambda r: tuple(r.keys()), rows).values()
-
-
-def create_row_id_generator(
-    table: Union[sa.Table, DeclarativeMeta],
-    row_id_column: str,
-    logger: Optional[Logger],
-) -> Callable[[Dict[str, Any]], str]:
-    """Generate an ID based on a hash of `row`'s data.
-
-    Args:
-        row (Dict[str, Any]): row with data that we should generate an ID for.
-
-    Returns:
-        str: The row's ID.
-    """
-    table = to_table(table)
-    _non_id_columns = {
-        *get_typed_columns(DataIDIgnore, table),
-        row_id_column,
-    }
-    _data_id_columns = [c.name for c in table.columns if c.name not in _non_id_columns]
-    if not len(_data_id_columns):
-        raise ValueError(
-            f"{table} does not have any ID columns. Can not create data ID generator."
-        )
-
-    def _create_row_data_id(row: Dict[str, Any]) -> str:
-        data_id_members = {k: v for k, v in row.items() if k in _data_id_columns}
-        if not len(data_id_members):
-            _id = str(uuid4())
-            logger.warning(
-                "Row does not contain any fields that can be used to generate a data ID. Random ID '%s' will be used. (Data ID columns: %s. Row: %s)",
-                _id,
-                _data_id_columns,
-                row,
-            )
-            return _id
-        # sort values by key so key ordering will not effect generated hash.
-        data_id_members = [
-            v for _, v in sorted(data_id_members.items(), key=itemgetter(0))
-        ]
-        return xxh128(pickle.dumps(data_id_members)).hexdigest()
-
-    return _create_row_data_id
-
-
-def get_typed_columns(
-    of_type: Any, table: Union[sa.Table, DeclarativeMeta]
-) -> List[str]:
-    """Find columns that are tagged as being of type `of_type` via querying type annotations and comments.
-
-    Args:
-        of_type (Any): The type who's type annotation should be searched for.
-        table (Union[sa.Table, DeclarativeMeta]): The table or entity to query.
-
-    Returns:
-        List[str]: Names of columns that are of type `of_type`.
-    """
-    table = to_table(table)
-
-    # extract type labels from column comments.
-    type_columns = {
-        col_name
-        for col_name, col in table.columns.items()
-        if col.comment == of_type.__name__
-    }
-    if not isinstance(table, sa.Table):
-        # extract type labels from column type annotations.
-        type_columns.update(
-            {
-                col_name
-                for col_name, hint in get_type_hints(table).items()
-                if hint is of_type
-            }
-        )
-    return list(type_columns)

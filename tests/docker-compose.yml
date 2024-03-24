@@ -1,20 +1,17 @@
 services:
   postgres:
-    container_name: postgres
     image: postgres:15
     environment:
       POSTGRES_USER: test
       POSTGRES_PASSWORD: test
       POSTGRES_DB: test
   minio:
-    container_name: minio
     image: minio/minio
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     command: server /data
   dbflows_test:
-    container_name: dbflows_test
     build:
       context: ..
       dockerfile: tests/Dockerfile

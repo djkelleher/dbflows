@@ -28,4 +28,4 @@ RUN micromamba clean --all --yes
 WORKDIR $PROJ_DIR
 COPY . .
 
-RUN pip install -e .[all]
+RUN pip install -e .[dev]

@@ -2,14 +2,14 @@ from uuid import uuid4
 
 import pytest
 
-from dbflows.load import Loader
+from dbflows.load import PgLoader
 
 
 @pytest.fixture
-def db_loader_creator(async_engine, single_column_table):
+def db_loader_creator(temp_db, single_column_table):
     async def _db_loader_creator(**kwargs):
-        loader = await Loader.create(
-            table=single_column_table, engine=async_engine, **kwargs
+        loader = await PgLoader.create(
+            table=single_column_table, dsn=temp_db, **kwargs
         )
         return loader
 
@@ -17,13 +17,13 @@ def db_loader_creator(async_engine, single_column_table):
 
 
 @pytest.mark.asyncio
-async def test_remove_duplicate_key_rows(
-    single_column_table, random_str_rows, async_engine, db_loader_creator
+async def test_duplicate_key_rows_keep(
+    single_column_table, random_str_rows, db_loader_creator
 ):
     rows = random_str_rows(single_column_table, 5)
     n_dupes = 2
     rows += rows[:n_dupes]
-    loader = await db_loader_creator(remove_duplicate_key_rows=True)
+    loader = await db_loader_creator(duplicate_key_rows_keep="last")
     filtered_rows = loader.filter_rows(rows)
     assert len(filtered_rows) == len(rows) - n_dupes
 

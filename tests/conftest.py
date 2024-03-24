@@ -9,17 +9,18 @@ from typing import Callable, List, Literal, Optional
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+import asyncpg
 import pytest
+import pytest_asyncio
 import sqlalchemy as sa
 from faker import Faker
 from fileflows import Files, S3Cfg
 from sqlalchemy.dialects.postgresql import TIMESTAMP
-from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.ext.asyncio.engine import AsyncEngine
 
 from dbflows.meta import ExportMeta
-from dbflows.utils import schema_table
+from dbflows.utils import schema_table, pg_url_w_driver
 
 
 def pytest_addoption(parser):
@@ -45,35 +46,27 @@ def pytest_addoption(parser):
     )
 
 
-@pytest.fixture
-def temp_db(request) -> str:
+@pytest_asyncio.fixture
+async def temp_db(request) -> str:
     """Create a temporary database and return its URL."""
     pg_url = request.config.getoption("--pg-url")
     base_url, db_name = os.path.split(pg_url)
     test_db_name = f"test_{db_name}"
-    eng = sa.create_engine(f"{base_url}/postgres")
-    # create the database.
-    with eng.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-        conn.execute(sa.text(f"DROP DATABASE IF EXISTS {test_db_name} WITH (FORCE)"))
-        conn.execute(sa.text(f"CREATE DATABASE {test_db_name}"))
-    # return URL to the created database.
+    conn = await asyncpg.connect(dsn=f"{base_url}/postgres")
+    await conn.execute(f"DROP DATABASE IF EXISTS {test_db_name} WITH (FORCE)")
+    await conn.execute(f"CREATE DATABASE {test_db_name}")
+    # provide URL to the created database.
     yield f"{base_url}/{test_db_name}"
     # drop the database.
-    with eng.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-        conn.execute(sa.text(f"DROP DATABASE {test_db_name} WITH (FORCE)"))
-    eng.dispose()
+    await conn.execute(f"DROP DATABASE {test_db_name} WITH (FORCE)")
+    await conn.close()
 
 
 @pytest.fixture
-def engine(temp_db) -> Engine:
-    eng = sa.create_engine(temp_db)
-    yield eng
-    eng.dispose()
-
-
-@pytest.fixture
-def async_engine(temp_db) -> AsyncEngine:
-    return create_async_engine(temp_db)
+def engine(temp_db) -> AsyncEngine:
+    temp_db = pg_url_w_driver(driver="psycopg", url=temp_db)
+    #return create_async_engine(temp_db)
+    return sa.create_engine(temp_db)
 
 
 @pytest.fixture
