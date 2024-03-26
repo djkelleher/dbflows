@@ -3,9 +3,11 @@ from .components import (
     MaterializedView,
     Procedure,
     SchedJob,
+    Table,
     View,
-    async_create_table,
-    create_table,
+    async_table_create,
+    escape_table_name,
+    table_create,
     time_bucket,
 )
 from .export import export, export_all, export_hypertable_chunks, export_table

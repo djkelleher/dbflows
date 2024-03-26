@@ -1,7 +1,3 @@
-
-import connectorx as cx
-import pandas as pd
-
 import os
 import re
 from dataclasses import dataclass
@@ -10,12 +6,14 @@ from multiprocessing import JoinableQueue, Process
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
+import connectorx as cx
+import pandas as pd
 import sqlalchemy as sa
 from quicklogs import get_logger
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 from tqdm import tqdm
 
-from dbflows.components import create_table
+from dbflows.components import table_create
 
 from .meta import create_export_meta
 from .utils import engine_url, query_str, remove_engine_driver, split_schema_table
@@ -103,7 +101,7 @@ def copy_table_data(
         dst_engine = sa.create_engine(dst_engine)
     if isinstance(dst_table, (sa.Table, DeclarativeMeta)):
         with dst_engine.begin() as conn:
-            create_table(conn, dst_table)
+            table_create(conn, dst_table)
         dst_table = getattr(dst_table, "__table__", dst_table)
     elif isinstance(dst_table, str):
         schema, table_name = split_schema_table(dst_table)

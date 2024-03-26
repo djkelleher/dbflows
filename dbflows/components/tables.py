@@ -23,7 +23,7 @@ tables_table = sa.Table(
 )
 
 
-def format_table_name(name: str) -> str:
+def escape_table_name(name: str) -> str:
     table = re.sub(r"\s+", "_", name)
     table = re.sub(r"^[0-9]", lambda m: "_" + m.group(), table)
     return table
@@ -46,7 +46,7 @@ class Table(DbObj):
 
     def create(self, engine: Engine, recreate: bool = False):
         with engine.begin() as conn:
-            create_table(conn, self.table, recreate)
+            table_create(conn, self.table, recreate)
 
     def drop(self, engine: Engine, cascade: bool = False):
         self.drop_table(engine, schema_table(self.table), cascade)
@@ -76,7 +76,7 @@ class Table(DbObj):
         return existing_tables
 
 
-def create_table(
+def table_create(
     conn,
     create_from: Union[sa.Table, DeclarativeMeta, ModuleType, Sequence],
     recreate: bool = False,
@@ -129,14 +129,14 @@ def create_table(
         create_hypertable(conn, table)
 
 
-async def async_create_table(
+async def async_table_create(
     create_from: Union[sa.Table, DeclarativeMeta, ModuleType, Sequence],
     engine: AsyncEngine,
     recreate: bool = False,
 ):
     async with engine.begin() as conn:
         await conn.run_sync(
-            lambda conn: create_table(conn, create_from=create_from, recreate=recreate)
+            lambda conn: table_create(conn, create_from=create_from, recreate=recreate)
         )
 
 

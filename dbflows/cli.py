@@ -252,16 +252,16 @@ def _transfer(
 @click.option(
     "--recreate", "-r", default=False, help="Recreate tables that currently exist."
 )
-async def create_tables(search_in: str, pg_url: str, recreate: bool):
+async def table_creates(search_in: str, pg_url: str, recreate: bool):
     """Create all tables found in provided module or package path."""
     from sqlalchemy.ext.asyncio import create_async_engine
 
-    from dbflows import async_create_table
-    from dbflows.utils import pg_url_w_driver
+    from dbflows import async_table_create
+    from dbflows.utils import driver_pg_url
 
-    engine = create_async_engine(pg_url_w_driver("asyncpg", pg_url))
+    engine = create_async_engine(driver_pg_url("asyncpg", pg_url))
     click.echo(f"Searching for tables in {search_in}")
-    await async_create_table(
+    await async_table_create(
         engine=engine,
         create_from=search_in,
         recreate=recreate,

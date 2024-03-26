@@ -203,7 +203,7 @@ def parse_pg_url(url: PostgresDsn) -> PostgresDsn:
     return url
 
 
-def pg_url_w_driver(driver: str, url: str) -> str:
+def driver_pg_url(driver: str, url: str) -> str:
     return url.replace("postgresql://", f"postgresql+{driver}://")
 
 

@@ -183,7 +183,7 @@ class PgLoader:
                 f"Invalid argument for on_duplicate_key_update: {self.on_duplicate_key_update}"
             )
         # create table if it doesn't already exist.
-        # await async_create_table(create_from=self.table, engine=self.pool)
+        # await async_table_create(create_from=self.table, engine=self.pool)
         return self
 
     async def load_row(self, row: Dict[str, Any]):
