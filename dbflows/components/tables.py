@@ -8,8 +8,8 @@ from dynamic_imports import class_inst
 from sqlalchemy import func as fn
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Engine
-from sqlalchemy.ext.asyncio.engine import AsyncEngine
 from sqlalchemy.orm.decl_api import DeclarativeMeta
+from sqlalchemy.schema import CreateTable
 
 from dbflows.utils import logger, schema_table, to_table
 
@@ -76,7 +76,7 @@ class Table(DbObj):
         return existing_tables
 
 
-def table_create(
+async def table_create(
     conn,
     create_from: Union[sa.Table, DeclarativeMeta, ModuleType, Sequence],
     recreate: bool = False,
@@ -84,7 +84,7 @@ def table_create(
     """Create a table in the database.
 
     Args:
-        conn (Connection): Connection to use for executing SQL statements.
+        conn: Connection to use for executing SQL statements.
         create_from (Union[sa.Table, Sequence[sa.Table], ModuleType]): The entity or table object to create a database table for.
         recreate (bool): If table exists, drop it and recreate. Defaults to False.
     """
@@ -96,20 +96,15 @@ def table_create(
     else:
         tables = create_from
     for table in tables:
-        table = to_table(create_from)
-        schema = table.schema or "public"
-        # create schema if needed.
-        if not conn.dialect.has_schema(conn, schema=schema):
-            logger.info("Creating schema '%s'", schema)
-            conn.execute(sa.schema.CreateSchema(schema))
+        table = to_table(table)
+        if schema := table.schema:
+            # create schema if needed.
+            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+        else:
+            schema = "public"
         table_name = table.name
-        # check if table exists.
-        if conn.dialect.has_table(conn, table_name=table_name, schema=schema):
-            if not recreate:
-                continue
-            logger.info("Dropping table %s.%s", schema, table)
-            conn.execute(sa.text(f'DROP TABLE {schema}."{table_name}" CASCADE'))
-            # table.drop(conn)
+        if recreate:
+            await conn.execute(f'DROP TABLE IF EXISTS {schema}."{table_name}" CASCADE')
         # create enum types if they do not already exist in the database.
         # this is necessary because sa.Table.create has no way to handle columns that have an enum type that already exists in the Database.
         enums = [
@@ -117,30 +112,22 @@ def table_create(
             for col in table.columns.values()
             if isinstance(col.type, (postgresql.ENUM, EnumMeta))
         ]
-        for enum in enums:
-            # check if enum type exists, create it if it doesn't.
-            enum.create(conn, checkfirst=True)
-            # prevent table.create for attempting to create the enum type.
-            enum.create_type = False
+        # TODO create enums.
+        # for enum in enums:
+        # check if enum type exists, create it if it doesn't.
+        # enum.create(conn, checkfirst=True)
+        # prevent table.create for attempting to create the enum type.
+        # enum.create_type = False
 
-        logger.info("Creating table %s.%s", schema, table)
-        table.create(conn)
-        # create hypertable if needed.
-        create_hypertable(conn, table)
-
-
-async def async_table_create(
-    create_from: Union[sa.Table, DeclarativeMeta, ModuleType, Sequence],
-    engine: AsyncEngine,
-    recreate: bool = False,
-):
-    async with engine.begin() as conn:
-        await conn.run_sync(
-            lambda conn: table_create(conn, create_from=create_from, recreate=recreate)
+        statement = CreateTable(table, if_not_exists=True).compile(
+            dialect=postgresql.dialect()
         )
+        await conn.execute(str(statement))
+        # create hypertable if needed.
+        await create_hypertable(conn, table)
 
 
-def create_hypertable(conn, table: Union[sa.Table, DeclarativeMeta]) -> None:
+async def create_hypertable(conn, table: Union[sa.Table, DeclarativeMeta]) -> None:
     # TODO secondary partition as comment pattern.
     """Create a hypertable partition if table or entity has a column that is flagged as a hypertable partition column.
     For numeric columns, hypertable partitions should be specify the unit of the values in the column (seconds, miliseconds, microseconds, nanoseconds),
@@ -186,4 +173,4 @@ def create_hypertable(conn, table: Union[sa.Table, DeclarativeMeta]) -> None:
             "Creating hypertable partition: %s.",
             statement,
         )
-        conn.execute(sa.text(statement))
+        await conn.execute(statement)

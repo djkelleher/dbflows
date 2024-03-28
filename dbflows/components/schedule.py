@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Engine
 from sqlalchemy.sql.expression import cast
 
-from dbflows.utils import execute_sql, logger, schema_table
+from dbflows.utils import logger, schema_table
 
 from .base import DbObj, query_kwargs
 

@@ -1,10 +1,10 @@
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import sqlalchemy as sa
 from sqlalchemy import func as fn
-from sqlalchemy.engine import Compiled, Engine
+from sqlalchemy.engine import Compiled
 
-from dbflows.utils import execute_sql, logger
+from dbflows.utils import logger, split_schema_table
 
 from .base import DbObj
 from .schedule import SchedJob
@@ -23,6 +23,7 @@ class Procedure(DbObj):
 
     def __init__(
         self,
+        pg_url: str,
         name: str,
         statement: Optional[Any] = None,
         comment: Optional[str] = None,
@@ -35,6 +36,7 @@ class Procedure(DbObj):
             comment (Optional[str], optional): comment on the procedure. Defaults to None.
             schedule (Optional[SchedJob], optional): schedule for the procedure. Defaults to None.
         """
+        super().__init__(pg_url)
         self.name = name
         self.statement = statement
         self.comment = comment
@@ -42,9 +44,8 @@ class Procedure(DbObj):
             schedule.name = name
         self.schedule = schedule
 
-    @staticmethod
     def list_all(
-        engine: Engine, schema: Optional[str] = None, name_pattern: Optional[str] = None
+        self, schema: Optional[str] = None, name_pattern: Optional[str] = None
     ) -> List[str]:
         """Return a list of existing procedures.
 
@@ -61,11 +62,11 @@ class Procedure(DbObj):
             query = query.where(routines_table.c.routine_schema == schema)
         if name_pattern:
             query = query.where(routines_table.c.routine_name.like(name_pattern))
-        with engine.begin() as conn:
+        with self.engine.begin() as conn:
             procs = list(execute_sql(query, conn).scalars())
         return procs
 
-    def create(self, engine: Engine):
+    def create(self):
         """Create a procedure in the database."""
         if not self.statement:
             raise ValueError(
@@ -73,7 +74,7 @@ class Procedure(DbObj):
             )
         if not isinstance(self.statement, (list, tuple)):
             self.statement = [self.statement]
-        with engine.begin() as conn:
+        with self.engine.begin() as conn:
             bodies = [
                 (
                     statement.compile(conn, compile_kwargs={"literal_binds": True})
@@ -92,9 +93,11 @@ class Procedure(DbObj):
                 "\n$$;",
             ]
         )
-        execute_sql(statement)
+        self.execute_sql(statement)
         if self.comment:
-            execute_sql(f"COMMENT ON PROCEDURE {self.name} () IS '{self.comment}';")
+            self.execute_sql(
+                f"COMMENT ON PROCEDURE {self.name} () IS '{self.comment}';"
+            )
         if self.schedule:
             self.schedule.create()
 
@@ -112,7 +115,7 @@ class Procedure(DbObj):
     def run(self):
         """Run the procedure."""
         logger.info("Running procedure: %s", self.name)
-        execute_sql(f"CALL {self.name}();")
+        self.execute_sql(f"CALL {self.name}();")
 
     def drop(self, cascade: bool = True):
         """Drop the procedure from the database.
@@ -120,18 +123,8 @@ class Procedure(DbObj):
         Args:
             cascade (bool, optional): Use DROP CASCADE. Defaults to True.
         """
-
-        self.drop(self.name, cascade=cascade)
-
-    @staticmethod
-    def drop_procedure(name: str, cascade: bool = True):
-        """Drop the procedure from the database.
-
-        Args:
-            cascade (bool, optional): Use DROP CASCADE. Defaults to True.
-        """
-        logger.info("Dropping procedure %s", name)
-        statement = [f"DROP PROCEDURE IF EXISTS {name}"]
+        logger.info("Dropping procedure %s", self.name)
+        statement = [f"DROP PROCEDURE IF EXISTS {self.name}"]
         if cascade:
             statement.append("CASCADE")
         execute_sql(" ".join(statement))

@@ -4,7 +4,7 @@ import sqlalchemy as sa
 from sqlalchemy import func as fn
 from sqlalchemy.engine import Engine
 
-from dbflows.utils import compile_sa_statement, execute_sql, logger, schema_table
+from dbflows.utils import compile_sa_statement, logger, schema_table
 
 from .base import DbObj, query_kwargs
 
@@ -66,7 +66,9 @@ class View(DbObj):
                 )
                 return
 
-        statement = f"CREATE OR REPLACE VIEW {self.name} AS {compile_sa_statement(engine, self.query)}"
+        statement = (
+            f"CREATE OR REPLACE VIEW {self.name} AS {compile_sa_statement(self.query)}"
+        )
         execute_sql(statement, engine)
         if self.comment:
             execute_sql(
@@ -140,7 +142,7 @@ class MaterializedView(View):
             self.storage_params = ",".join(self.storage_params)
         if self.storage_params:
             statement.append(f"WITH ({self.storage_params})")
-        statement.append(f"AS {compile_sa_statement(engine, self.query)}")
+        statement.append(f"AS {compile_sa_statement(self.query)}")
         if self.create_with_no_data:
             statement.append("WITH NO DATA")
         execute_sql(" ".join(statement), engine)

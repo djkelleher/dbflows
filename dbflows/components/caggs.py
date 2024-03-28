@@ -7,7 +7,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.sql.elements import TextClause
 from sqlalchemy.sql.functions import _FunctionGenerator
 
-from dbflows.utils import execute_sql, logger, next_time_occurrence, schema_table
+from dbflows.utils import logger, next_time_occurrence, schema_table
 
 from .base import query_kwargs
 from .views import MaterializedView
