@@ -5,7 +5,9 @@ from subprocess import run
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 from zoneinfo import ZoneInfo
 
+import asyncpg
 import sqlalchemy as sa
+from async_lru import alru_cache
 from pydantic import PostgresDsn, validate_call
 from quicklogs import get_logger
 from sqlalchemy.dialects import postgresql
@@ -21,6 +23,12 @@ TimeT = Union[int, float, datetime, date]
 _ws_re = re.compile(r"\s+")
 _camel_re = re.compile(r"([a-z0-9])([A-Z])")
 _digit_start_re = re.compile(r"^\d")
+
+
+@alru_cache(maxsize=None)
+async def get_connection_pool(pg_url: str):
+    """Get a (possibly shared) connection pool for the given PostgreSQL database."""
+    return await asyncpg.create_pool(dsn=pg_url)
 
 
 def to_snake_case(name: str) -> str:
@@ -106,23 +114,15 @@ def to_table(table: Union[sa.Table, DeclarativeMeta]) -> sa.Table:
     )
 
 
-def execute_sql(sql: Any, engine: Engine):
-    # TODO move this?
-    """Execute a SQL statement."""
-    logger.info(sql)
-    if isinstance(sql, str):
-        sql = sa.text(sql)
-    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-        return conn.execute(sql)
-
-
 def compile_sa_statement(statement: Any) -> str:
     """Compile a SQLAlchemy statement and bind query parameters."""
-    return str(
+    statement = str(
         statement.compile(
-            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
         )
     )
+    return statement
 
 
 def column_type_casts(

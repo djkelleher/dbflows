@@ -5,15 +5,12 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Union
 
 import asyncpg
 import sqlalchemy as sa
-from asyncpg.exceptions import CardinalityViolationError
 from cytoolz.itertoolz import groupby, partition_all
 from quicklogs import get_logger
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.dialects.postgresql.dml import Insert
-from sqlalchemy.exc import CompileError
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 
-from .utils import compile_sa_statement, to_table
+from .components import table_create
+from .utils import compile_sa_statement, get_connection_pool, schema_table, to_table
 
 
 async def load_rows(
@@ -30,12 +27,12 @@ async def load_rows(
 async def load_row(
     table: Union[sa.Table, DeclarativeMeta],
     pg_url: str,
-    rows: Dict[str, Any],
+    row: Dict[str, Any],
     *args,
     **kwargs,
 ):
     loader = await PgLoader.create(table=table, pg_url=pg_url, *args, **kwargs)
-    await loader.load_row(rows=rows)
+    await loader.load_row(row=row)
 
 
 class PgLoader:
@@ -54,7 +51,7 @@ class PgLoader:
         value_map: Optional[Dict[Any, Any]] = None,
         column_values_converter: Optional[Callable[[Any], Any]] = None,
         column_value_converters: Optional[Dict[str, Callable[[Any], Any]]] = None,
-        group_by_columns_present: bool = False,
+        group_by_columns_present: bool = True,
         max_conn: int = int(os.cpu_count() * 0.8),
         logger: Optional[Logger] = None,
     ) -> None:
@@ -81,10 +78,14 @@ class PgLoader:
         """
         self = cls()
         self.table = to_table(table)
-        self.pool = await asyncpg.create_pool(dsn=pg_url)
+        # TODO change this?
+        self.pool = await asyncpg.create_pool(
+            dsn=pg_url
+        )  # await get_connection_pool(pg_url)
         self.row_batch_size = row_batch_size
         self.on_duplicate_key_update = on_duplicate_key_update
         self.group_by_columns_present = group_by_columns_present
+        # TODO use this.
         self.max_conn = max_conn
         self.logger = logger or get_logger(f"{self.table.name}-loader")
         self.duplicate_key_rows_keep = duplicate_key_rows_keep
@@ -134,9 +135,15 @@ class PgLoader:
 
             def apply_value_map(rows):
                 """Set values to desired alternative value."""
-                return [
-                    {k: value_map.get(v, v) for k, v in row.items()} for row in rows
-                ]
+                filtered = []
+                for row in rows:
+                    for col, val in row.items():
+                        try:
+                            row[col] = value_map.get(val, val)
+                        except TypeError:
+                            pass
+                    filtered.append(row)
+                return filtered
 
             self._filters.append(apply_value_map)
 
@@ -171,22 +178,33 @@ class PgLoader:
                 for col_name, col in self.table.columns.items()
                 if not col.primary_key
             ]
+        pkey_cols = ",".join(self._primary_key_column_names)
+        insert_statement = f"INSERT INTO {schema_table(self.table)} ({{}}) VALUES {{}}"
         if self.on_duplicate_key_update:
             # update provided columns.
-            self._build_statement = self._upsert_update_statement
+            update_cols = ",".join(
+                [f"{col}=EXCLUDED.{col}" for col in self.on_duplicate_key_update]
+            )
+            self._statement_template = f"{insert_statement} ON CONFLICT ({pkey_cols}) DO UPDATE SET {update_cols}"
         elif self.on_duplicate_key_update == False:
-            self._build_statement = self._upsert_ignore_statement
+            self._statement_template = (
+                f"{insert_statement} ON CONFLICT ({pkey_cols}) DO NOTHING"
+            )
         elif not self.on_duplicate_key_update:
-            self._build_statement = self._insert_statement
+            self._statement_template = insert_statement
         else:
             raise ValueError(
                 f"Invalid argument for on_duplicate_key_update: {self.on_duplicate_key_update}"
             )
         # create table if it doesn't already exist.
-        # await async_table_create(create_from=self.table, engine=self.pool)
+        async with self.pool.acquire() as conn:
+            await table_create(conn=conn, create_from=self.table)
         return self
 
     async def load_row(self, row: Dict[str, Any]):
+        row = self.filter_rows([row])
+        if not row:
+            return
         await self._load(row)
 
     async def load_rows(self, rows: List[Dict[str, Any]]):
@@ -197,7 +215,7 @@ class PgLoader:
         """
         rows = self.filter_rows(rows)
         if not rows:
-            return []
+            return
         # upsert all batches.
         self.logger.info(
             "Loading %i rows to the database.",
@@ -250,32 +268,27 @@ class PgLoader:
         async with self.pool.acquire() as conn:
             return await conn.fetchval(compile_sa_statement(query))
 
-    async def _load(self, rows):
+    async def _load(self, rows: List[List[Any]]):
+        # rows should all contain same columns.
+        columns = list(rows[0].keys())
+        n_cols = len(columns)
+        start = 1
+        row_place_holders, values = [], []
+        for row in rows:
+            end = start + n_cols
+            row_place_holders.append(
+                f"({','.join([f'${i}' for i in range(start, end)])})"
+            )
+            start = end
+            for col in columns:
+                values.append(row.get(col))
+
+        row_place_holders = ",".join(row_place_holders)
         async with self.pool.acquire() as conn:
-            try:
-                statement = compile_sa_statement(self._build_statement(rows))
-                await conn.execute(statement)
-            except CardinalityViolationError as e1:
-                if (self.duplicate_key_rows_keep is None) and (
-                    "command cannot affect row a second time" in e1._message()
-                ):
-                    return await self._load(self._apply_duplicate_key_rows_keep(rows))
-                else:
-                    raise e1
-            except CompileError as ce:
-                if (
-                    not self.group_by_columns_present
-                    and "is explicitly rendered as a boundparameter in the VALUES clause"
-                    in ce._message()
-                ):
-                    return await asyncio.gather(
-                        *[
-                            asyncio.create_task(self._load(rows))
-                            for rows in groupby_columns(rows)
-                        ]
-                    )
-                else:
-                    raise ce
+            await conn.execute(
+                self._statement_template.format(",".join(columns), row_place_holders),
+                *values,
+            )
 
     def _apply_duplicate_key_rows_keep(
         self,
@@ -303,55 +316,6 @@ class PgLoader:
                 row_count,
             )
         return unique_key_rows
-
-    def _insert_statement(self, rows: List[Dict[str, Any]]) -> Insert:
-        """Construct a statement to insert `rows`.
-
-        Args:
-            rows (List[Dict[str,Any]]): The rows that will be loaded.
-
-        Returns:
-            Insert: An insert statement.
-        """
-        return postgresql.insert(self.table).values(rows)
-
-    def _upsert_update_statement(self, rows: List[Dict[str, Any]]) -> Insert:
-        """Construct a statement to load `rows`.
-
-        Args:
-            rows (List[Dict[str,Any]]): The rows that will be loaded.
-
-        Returns:
-            Insert: An upsert statement.
-        """
-
-        # check column of first row (all rows should have same columns)
-        sample_row = rows[0]
-        on_duplicate_key_update = [
-            c for c in self.on_duplicate_key_update if c in sample_row
-        ]
-        if len(on_duplicate_key_update):
-            statement = postgresql.insert(self.table).values(rows)
-            return statement.on_conflict_do_update(
-                index_elements=self._primary_key_column_names,
-                set_={k: statement.excluded[k] for k in on_duplicate_key_update},
-            )
-        return self._upsert_ignore_statement(rows)
-
-    def _upsert_ignore_statement(self, rows: List[Dict[str, Any]]) -> Insert:
-        """Construct a statement to load `rows`.
-
-        Args:
-            rows (List[Dict[str,Any]]): The rows that will be loaded.
-
-        Returns:
-            Insert: An upsert statement.
-        """
-        return (
-            postgresql.insert(self.table)
-            .values(rows)
-            .on_conflict_do_nothing(index_elements=self._primary_key_column_names)
-        )
 
 
 def create_column_name_converter(

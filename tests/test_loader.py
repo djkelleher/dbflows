@@ -5,9 +5,6 @@ from uuid import uuid4
 import asyncpg
 import pytest
 import sqlalchemy as sa
-from asyncpg.exceptions import CardinalityViolationError
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.exc import CompileError
 
 from dbflows.load import PgLoader, groupby_columns
 
@@ -162,46 +159,6 @@ def test_group_by_columns():
 
 
 @pytest.mark.asyncio
-async def test_compile_error(key_multi_value_table, temp_db):
-    loader = await PgLoader.create(
-        key_multi_value_table, group_by_columns_present=False, pg_url=temp_db
-    )
-    rows = [
-        {"key": str(uuid4()), "data1": str(uuid4()), "data2": str(uuid4())},
-        {"key": str(uuid4()), "data1": str(uuid4())},
-    ]
-    with pytest.raises(
-        CompileError,
-        match="is explicitly rendered as a boundparameter in the VALUES clause",
-    ):
-        loader._build_statement(rows).compile(
-            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
-        )
-
-
-@pytest.mark.asyncio
-async def test_cardinality_violation_error(key_value_table, temp_db):
-    loader = await PgLoader.create(
-        key_value_table, duplicate_key_rows_keep="first", pg_url=temp_db
-    )
-    key = str(uuid4())
-    rows = [
-        {"key": key, "data": str(uuid4())},
-        {"key": key, "data": str(uuid4())},
-    ]
-    statement = loader._build_statement(rows).compile(
-        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
-    )
-    conn = await asyncpg.connect(temp_db)
-    with pytest.raises(
-        CardinalityViolationError,
-        match="command cannot affect row a second time",
-    ):
-        await conn.execute(str(statement))
-    await conn.close()
-
-
-@pytest.mark.asyncio
 async def test_fetch(key_multi_value_table, temp_db):
     loader = await PgLoader.create(key_multi_value_table, pg_url=temp_db)
     key1 = str(uuid4())
@@ -223,7 +180,9 @@ async def test_fetchrow(key_multi_value_table, temp_db):
         {"key": str(uuid4()), "data1": str(uuid4()), "data2": str(uuid4())},
     ]
     await loader.load_rows(rows)
-    fetched_row = await loader.fetchrow(sa.select(key_multi_value_table).where(key_multi_value_table.c.key == key1))
+    fetched_row = await loader.fetchrow(
+        sa.select(key_multi_value_table).where(key_multi_value_table.c.key == key1)
+    )
     assert isinstance(fetched_row, asyncpg.Record)
 
 
@@ -236,5 +195,9 @@ async def test_fetchval(key_multi_value_table, temp_db):
         {"key": str(uuid4()), "data1": str(uuid4()), "data2": str(uuid4())},
     ]
     await loader.load_rows(rows)
-    fetched_value = await loader.fetchval(sa.select(key_multi_value_table.c.data1).where(key_multi_value_table.c.key == key1))
+    fetched_value = await loader.fetchval(
+        sa.select(key_multi_value_table.c.data1).where(
+            key_multi_value_table.c.key == key1
+        )
+    )
     assert isinstance(fetched_value, str)

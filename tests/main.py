@@ -15,15 +15,15 @@ args = [
 
 files = [
     # "test_compare.py",
-    # "test_copy.py",
-    # "test_file_meta.py",
-    # "test_export_table.py",
-    # "test_export_partitions.py",
-    # "test_export_slices.py",
-    # "test_export_partition_slices.py",
-    # "test_loader_filters.py",
-    "test_loader.py",
-    # "test_transfer.py",
+    #"test_copy.py",
+    #"test_file_meta.py",
+    #"test_export_table.py",
+    #"test_export_partitions.py",
+    #"test_export_slices.py",
+    #"test_export_partition_slices.py",
+    #"test_loader_filters.py",
+    #"test_loader.py",
+    "test_transfer.py",
 ]
 if __name__ == "__main__":
     # while True:

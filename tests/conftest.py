@@ -16,11 +16,10 @@ import sqlalchemy as sa
 from faker import Faker
 from fileflows import Files, S3Cfg
 from sqlalchemy.dialects.postgresql import TIMESTAMP
-from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.ext.asyncio.engine import AsyncEngine
 
 from dbflows.meta import ExportMeta
-from dbflows.utils import schema_table, pg_url_w_driver
+from dbflows.utils import driver_pg_url, schema_table
 
 
 def pytest_addoption(parser):
@@ -64,8 +63,8 @@ async def temp_db(request) -> str:
 
 @pytest.fixture
 def engine(temp_db) -> AsyncEngine:
-    temp_db = pg_url_w_driver(driver="psycopg", url=temp_db)
-    #return create_async_engine(temp_db)
+    temp_db = driver_pg_url(driver="psycopg", url=temp_db)
+    # return create_async_engine(temp_db)
     return sa.create_engine(temp_db)
 
 
