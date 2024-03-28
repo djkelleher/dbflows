@@ -1,6 +1,6 @@
 [project]
 name = "dbflows"
-version = "0.1.6"
+version = "0.1.7"
 description = "Database incremental exports, transfers, imports, ETL, creation / management"
 authors = [{ name = "Dan Kelleher", email = "kelleherjdan@gmail.com" }]
 license = { text = "MIT" }
@@ -14,6 +14,7 @@ classifiers = [
 ]
 
 dependencies = [
+    "async_lru",
     "fileflows",
     "sqlalchemy>=2.0.0",
     "quicklogs",
@@ -26,6 +27,7 @@ dependencies = [
     "connectorx",
     "pandas>=2.0.0",
     "asyncpg",
+    "psycopg[binary]",
 ]
 
 [project.optional-dependencies]
