@@ -1,12 +1,12 @@
 import asyncio
-import os
 from logging import Logger
 from typing import Any, Callable, Dict, List, Literal, Optional, Union
 
-import asyncpg
 import sqlalchemy as sa
+import ujson as json
 from cytoolz.itertoolz import groupby, partition_all
 from quicklogs import get_logger
+from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 
 from .components import table_create
@@ -52,7 +52,7 @@ class PgLoader:
         column_values_converter: Optional[Callable[[Any], Any]] = None,
         column_value_converters: Optional[Dict[str, Callable[[Any], Any]]] = None,
         group_by_columns_present: bool = True,
-        max_conn: int = int(os.cpu_count() * 0.8),
+        max_conn: int = 10,
         logger: Optional[Logger] = None,
     ) -> None:
         """Load data rows to a postgresql database.
@@ -73,20 +73,15 @@ class PgLoader:
             column_values_converter (Optional[Callable[[Any], Any]], optional): A conversion function to apply to every value. Defaults to None.
             value_map (Optional[Dict[Any, Any]], optional): Map value to desired value. Defaults to None.
             group_by_columns_present (bool, optional): Group rows by columns present and execute upsert statement for each group. Defaults to True.
-            max_conn (int, optional): Maximum number of connections to use. Defaults to int(os.cpu_count() * 0.8).
+            max_conn (int, optional): Maximum number of connections to use in connection pool. Defaults to 10.
             logger (Optional[Logger], optional): Logger to use. Defaults to None.
         """
         self = cls()
         self.table = to_table(table)
-        # TODO change this?
-        self.pool = await asyncpg.create_pool(
-            dsn=pg_url
-        )  # await get_connection_pool(pg_url)
+        self.pool = await get_connection_pool(pg_url, max_conn=max_conn)
         self.row_batch_size = row_batch_size
         self.on_duplicate_key_update = on_duplicate_key_update
         self.group_by_columns_present = group_by_columns_present
-        # TODO use this.
-        self.max_conn = max_conn
         self.logger = logger or get_logger(f"{self.table.name}-loader")
         self.duplicate_key_rows_keep = duplicate_key_rows_keep
         self._primary_key_column_names = _primary_key_column_names = {
@@ -158,6 +153,19 @@ class PgLoader:
 
             self._filters.append(apply_value_converter)
 
+        # check for JSON columns.
+        json_cols = [
+            c.name for c in self.table.columns.values() if isinstance(c.type, JSON)
+        ]
+        if json_cols:
+            if column_value_converters is None:
+                column_value_converters = {}
+            for col in json_cols:
+                if col not in column_value_converters:
+                    column_value_converters[col] = lambda v: (
+                        json.dumps(v) if v else None
+                    )
+
         if column_value_converters:
 
             def apply_column_value_converters(rows):
@@ -178,7 +186,7 @@ class PgLoader:
                 for col_name, col in self.table.columns.items()
                 if not col.primary_key
             ]
-        pkey_cols = ",".join(self._primary_key_column_names)
+        pkey_cols = ",".join([f'"{c}"' for c in self._primary_key_column_names])
         insert_statement = f"INSERT INTO {schema_table(self.table)} ({{}}) VALUES {{}}"
         if self.on_duplicate_key_update:
             # update provided columns.
@@ -282,13 +290,12 @@ class PgLoader:
             start = end
             for col in columns:
                 values.append(row.get(col))
-
         row_place_holders = ",".join(row_place_holders)
+        statement = self._statement_template.format(
+            ",".join([f'"{c}"' for c in columns]), row_place_holders
+        )
         async with self.pool.acquire() as conn:
-            await conn.execute(
-                self._statement_template.format(",".join(columns), row_place_holders),
-                *values,
-            )
+            await conn.execute(statement, *values)
 
     def _apply_duplicate_key_rows_keep(
         self,
@@ -303,13 +310,15 @@ class PgLoader:
         Returns:
             List[Dict[str, Any]]: Duplicate-free data rows.
         """
+        row_count = len(rows)
         if self.duplicate_key_rows_keep == "first":
             rows = reversed(rows)
         unique_key_rows = {
             tuple([row[c] for c in self._primary_key_column_names]): row for row in rows
         }
         unique_key_rows = list(unique_key_rows.values())
-        if (unique_count := len(unique_key_rows)) < (row_count := len(rows)):
+        unique_count = len(unique_key_rows)
+        if unique_count < row_count:
             self.logger.warning(
                 "%i/%i rows had a duplicate primary key and will not be loaded.",
                 row_count - unique_count,

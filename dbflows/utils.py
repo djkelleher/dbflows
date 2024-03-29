@@ -26,9 +26,9 @@ _digit_start_re = re.compile(r"^\d")
 
 
 @alru_cache(maxsize=None)
-async def get_connection_pool(pg_url: str):
+async def get_connection_pool(pg_url: str, max_conn: int = 10):
     """Get a (possibly shared) connection pool for the given PostgreSQL database."""
-    return await asyncpg.create_pool(dsn=pg_url)
+    return await asyncpg.create_pool(dsn=pg_url, max_size=max_conn)
 
 
 def to_snake_case(name: str) -> str:
