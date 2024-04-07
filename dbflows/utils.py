@@ -114,15 +114,16 @@ def to_table(table: Union[sa.Table, DeclarativeMeta]) -> sa.Table:
     )
 
 
-def compile_sa_statement(statement: Any) -> str:
+def compile_statement(statement: Any) -> str:
     """Compile a SQLAlchemy statement and bind query parameters."""
-    statement = str(
+    if isinstance(statement, str):
+        return statement
+    return str(
         statement.compile(
             dialect=postgresql.dialect(),
             compile_kwargs={"literal_binds": True},
         )
     )
-    return statement
 
 
 def column_type_casts(
