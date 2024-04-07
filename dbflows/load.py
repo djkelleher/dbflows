@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 
 from .components import table_create
-from .utils import compile_sa_statement, get_connection_pool, schema_table, to_table
+from .utils import compile_statement, get_connection_pool, schema_table, to_table
 
 
 async def load_rows(
@@ -42,6 +42,7 @@ class PgLoader:
         table: Union[sa.Table, DeclarativeMeta],
         pg_url: str,
         on_duplicate_key_update: Optional[Union[bool, List[str]]] = True,
+        key_columns: Optional[List[str]] = None,
         row_batch_size: int = 1500,
         duplicate_key_rows_keep: Optional[Literal["first", "last"]] = None,
         remove_rows_missing_key: bool = False,
@@ -61,7 +62,8 @@ class PgLoader:
         Args:
             table (Union[sa.Table, DeclarativeMeta]): The SQLAlchemy table or entity corresponding to the database table that rows will be loaded to.
             dsn (str): The PostgreSQL dsn connection string to the database.
-            on_duplicate_key_update (Union[bool, List[str]], optional): List of columns that should be updated when primary key exists, or True for all columns, False for no columns, None if duplicates should not be checked (i.e. a normal INSERT). Defaults to True.
+            on_duplicate_key_update (Union[bool, List[str]], optional): List of columns that should be updated when key columns exists, or True for all columns, False for no columns, None if duplicates should not be checked (i.e. a normal INSERT). Defaults to True.
+            key_columns (Optional[List[str]], optional): List of key columns that should be used for on_duplicate_key_update. Default to primary key.
             row_batch_size (int): Number of rows to load per statement. Defaults to 1500.
             column_name_map (Optional[Dict[str, str]], optional): Map column name to desired column name. Defaults to None.
             column_names_converter (Callable[[str], str], optional): A formatting function to apply to every name. Defaults to None.
@@ -82,13 +84,13 @@ class PgLoader:
         self.row_batch_size = row_batch_size
         self.on_duplicate_key_update = on_duplicate_key_update
         self.group_by_columns_present = group_by_columns_present
-        self.logger = logger or get_logger(f"{self.table.name}-loader")
-        self.duplicate_key_rows_keep = duplicate_key_rows_keep
-        self._primary_key_column_names = _primary_key_column_names = {
+        self.key_columns = key_columns or {
             c.name for c in self.table.primary_key.columns
         }
-        if not _primary_key_column_names:
-            # not applicable because there are no keys.
+        self.logger = logger or get_logger(f"{self.table.name}-loader")
+        self.duplicate_key_rows_keep = duplicate_key_rows_keep
+        if not self.key_columns:
+            # not applicable.
             remove_rows_missing_key = False
             self.on_duplicate_key_update = None
             self.duplicate_key_rows_keep = None
@@ -115,11 +117,7 @@ class PgLoader:
         if remove_rows_missing_key:
 
             def apply_remove_rows_missing_key(rows: List[Dict[str, Any]]):
-                return [
-                    row
-                    for row in rows
-                    if all(c in row for c in _primary_key_column_names)
-                ]
+                return [row for row in rows if all(c in row for c in self.key_columns)]
 
             self._filters.append(apply_remove_rows_missing_key)
 
@@ -186,17 +184,18 @@ class PgLoader:
                 for col_name, col in self.table.columns.items()
                 if not col.primary_key
             ]
-        pkey_cols = ",".join([f'"{c}"' for c in self._primary_key_column_names])
+
+        key_cols = ",".join([f'"{c}"' for c in self.key_columns])
         insert_statement = f"INSERT INTO {schema_table(self.table)} ({{}}) VALUES {{}}"
         if self.on_duplicate_key_update:
             # update provided columns.
             update_cols = ",".join(
                 [f"{col}=EXCLUDED.{col}" for col in self.on_duplicate_key_update]
             )
-            self._statement_template = f"{insert_statement} ON CONFLICT ({pkey_cols}) DO UPDATE SET {update_cols}"
+            self._statement_template = f"{insert_statement} ON CONFLICT ({key_cols}) DO UPDATE SET {update_cols}"
         elif self.on_duplicate_key_update == False:
             self._statement_template = (
-                f"{insert_statement} ON CONFLICT ({pkey_cols}) DO NOTHING"
+                f"{insert_statement} ON CONFLICT ({key_cols}) DO NOTHING"
             )
         elif not self.on_duplicate_key_update:
             self._statement_template = insert_statement
@@ -209,7 +208,11 @@ class PgLoader:
             await table_create(conn=conn, create_from=self.table)
         return self
 
-    async def load_row(self, row: Dict[str, Any]):
+    async def load_row(self, row: Dict[str, Any], **kwargs):
+        if row:
+            row.update(kwargs)
+        else:
+            row = kwargs
         row = self.filter_rows([row])
         if not row:
             return
@@ -266,15 +269,15 @@ class PgLoader:
 
     async def fetch(self, query: sa.Select) -> List[Any]:
         async with self.pool.acquire() as conn:
-            return await conn.fetch(compile_sa_statement(query))
+            return await conn.fetch(compile_statement(query))
 
     async def fetchrow(self, query: sa.Select) -> List[Any]:
         async with self.pool.acquire() as conn:
-            return await conn.fetchrow(compile_sa_statement(query))
+            return await conn.fetchrow(compile_statement(query))
 
     async def fetchval(self, query: sa.Select) -> List[Any]:
         async with self.pool.acquire() as conn:
-            return await conn.fetchval(compile_sa_statement(query))
+            return await conn.fetchval(compile_statement(query))
 
     async def _load(self, rows: List[List[Any]]):
         # rows should all contain same columns.
@@ -314,7 +317,7 @@ class PgLoader:
         if self.duplicate_key_rows_keep == "first":
             rows = reversed(rows)
         unique_key_rows = {
-            tuple([row[c] for c in self._primary_key_column_names]): row for row in rows
+            tuple([row[c] for c in self.key_column]): row for row in rows
         }
         unique_key_rows = list(unique_key_rows.values())
         unique_count = len(unique_key_rows)
