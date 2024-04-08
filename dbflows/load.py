@@ -317,13 +317,13 @@ class PgLoader:
         if self.duplicate_key_rows_keep == "first":
             rows = reversed(rows)
         unique_key_rows = {
-            tuple([row[c] for c in self.key_column]): row for row in rows
+            tuple([row[c] for c in self.key_columns]): row for row in rows
         }
         unique_key_rows = list(unique_key_rows.values())
         unique_count = len(unique_key_rows)
         if unique_count < row_count:
             self.logger.warning(
-                "%i/%i rows had a duplicate primary key and will not be loaded.",
+                "%i/%i rows had a duplicate key and will not be loaded.",
                 row_count - unique_count,
                 row_count,
             )
