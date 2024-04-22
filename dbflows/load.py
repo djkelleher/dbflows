@@ -208,7 +208,7 @@ class PgLoader:
             await table_create(conn=conn, create_from=self.table)
         return self
 
-    async def load_row(self, row: Dict[str, Any], **kwargs):
+    async def load_row(self, row: Dict[str, Any] = None, **kwargs):
         if row:
             row.update(kwargs)
         else:
