@@ -1,5 +1,6 @@
 import re
 from enum import EnumMeta
+from pprint import pformat
 from types import ModuleType
 from typing import List, Optional, Sequence, Union
 
@@ -95,6 +96,11 @@ async def table_create(
         tables += class_inst(class_type=DeclarativeMeta, search_in=create_from)
     else:
         tables = create_from
+    logger.info(
+        "Checking %i tables existence: %s",
+        len(tables),
+        pformat([schema_table(t) for t in tables]),
+    )
     for table in tables:
         table = to_table(table)
         if schema := table.schema:
