@@ -6,7 +6,7 @@ from datetime import date, datetime
 from pathlib import Path
 from pprint import pformat
 from tempfile import NamedTemporaryFile
-from typing import ClassVar, List, Optional, Sequence, Union
+from typing import ClassVar, Generator, List, Optional, Sequence, Union
 
 import pandas as pd
 import sqlalchemy as sa
@@ -235,7 +235,7 @@ def create_export_meta(
     file_max_size: Optional[str] = None,
     file_stem_prefix: Optional[str] = None,
     fo: Optional[Files] = None,
-) -> List[ExportMeta]:
+) -> Generator[None, ExportMeta, None]:
     """Export data from a database table.
 
     Args:
