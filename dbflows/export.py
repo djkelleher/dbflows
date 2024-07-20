@@ -7,8 +7,8 @@ from typing import Optional, Sequence, Union
 
 import sqlalchemy as sa
 from fileflows import Files
-from sqlalchemy.engine import Engine
 from fileflows.s3 import is_s3_path
+from sqlalchemy.engine import Engine
 
 from .meta import ExportMeta, create_export_meta
 from .utils import copy_to_csv, logger, schema_table

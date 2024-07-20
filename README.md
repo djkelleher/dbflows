@@ -16,8 +16,8 @@ To install `psql`:
 # enable PostgreSQL package repository
 sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
 wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /etc/apt/trusted.gpg.d/pgdg.asc &>/dev/null
-# replace `15` with the major version of your database
-sudo apt update && sudo apt install -y postgresql-client-15
+# replace `16` with the major version of your database
+sudo apt update && sudo apt install -y postgresql-client-16
 ```
 
 ## Export
