@@ -1,11 +1,12 @@
 from typing import Dict, List, Optional, Sequence, Union
 
 import sqlalchemy as sa
-from dbflows.utils import compile_statement, logger, schema_table
 from sqlalchemy import func as fn
 from sqlalchemy.engine import Engine
 
-from .base import DbObj, query_kwargs
+from dbflows.utils import compile_statement, logger, schema_table
+
+from .utils import DbObj, query_kwargs
 
 pg_views_meta_table = sa.Table(
     "views",

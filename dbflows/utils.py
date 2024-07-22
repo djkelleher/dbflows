@@ -116,14 +116,12 @@ def to_table(table: Union[sa.Table, DeclarativeMeta]) -> sa.Table:
 
 def compile_statement(statement: Any) -> str:
     """Compile a SQLAlchemy statement and bind query parameters."""
-    if isinstance(statement, str):
-        return statement
-    return str(
-        statement.compile(
+    if not isinstance(statement, (str, Compiled)):
+        statement = statement.compile(
             dialect=postgresql.dialect(),
             compile_kwargs={"literal_binds": True},
         )
-    )
+    return re.sub(r"\s+", " ", str(statement)).strip()
 
 
 def column_type_casts(
@@ -224,14 +222,6 @@ def range_slices(
     return ranges
 
 
-def query_str(query: Any, engine: Engine) -> str:
-    """Bind query parameter and compile SQLAlchemy query to string."""
-    if not isinstance(query, (str, Compiled)):
-        with engine.begin() as conn:
-            query = query.compile(conn, compile_kwargs={"literal_binds": True})
-    return re.sub(r"\s+", " ", str(query)).strip()
-
-
 def pg_tz(engine) -> str:
     with engine.begin() as conn:
         return conn.execute(sa.text("SELECT current_setting('TIMEZONE');")).scalar()
@@ -270,12 +260,10 @@ def copy_to_csv(
     append: bool,
 ):
     """Copy a table or query result to a csv file."""
-    if isinstance(engine, str):
-        engine = sa.create_engine(engine)
     to_copy = (
         schema_table(to_copy)
         if isinstance(to_copy, sa.Table)
-        else f"({query_str(to_copy, engine)})"
+        else f"({compile_statement(to_copy)})"
     )
     save_path = Path(save_path)
     if not save_path.exists() and save_path.suffix != ".gz":
@@ -303,3 +291,7 @@ def duckdb_table_to_csv(conn, export_dir, table_name: str):
     conn.sql(
         f"COPY (SELECT * FROM {table_name} order by time desc) TO '{export_dir}/{table_name}.csv' (HEADER, DELIMITER ',');"
     )
+
+
+def query_kwargs(kwargs) -> str:
+    return ",".join([f"{k} => {v}" for k, v in kwargs.items()])

@@ -13,10 +13,14 @@ from quicklogs import get_logger
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 from tqdm import tqdm
 
-from dbflows.components import table_create
-
 from .meta import create_export_meta
-from .utils import engine_url, query_str, remove_engine_driver, split_schema_table
+from .tables import create_tables
+from .utils import (
+    compile_statement,
+    engine_url,
+    remove_engine_driver,
+    split_schema_table,
+)
 
 
 @dataclass
@@ -101,7 +105,7 @@ def copy_table_data(
         dst_engine = sa.create_engine(dst_engine)
     if isinstance(dst_table, (sa.Table, DeclarativeMeta)):
         with dst_engine.begin() as conn:
-            table_create(conn, dst_table)
+            create_tables(conn, dst_table)
         dst_table = getattr(dst_table, "__table__", dst_table)
     elif isinstance(dst_table, str):
         schema, table_name = split_schema_table(dst_table)
@@ -227,7 +231,7 @@ def _get_src_query(src: Any, src_engine: sa.Engine) -> Tuple[sa.Select, str]:
         else:
             # make query string object.
             src_query = sa.text(src)
-    src_query_str = query_str(src_query, src_engine)
+    src_query_str = compile_statement(src_query, src_engine)
     return src_query, src_query_str
 
 
@@ -290,7 +294,7 @@ def _copy_table_data_worker(
                             src_query_str,
                         )
         else:
-            src_query = query_str(src_query, src_engine)
+            src_query = compile_statement(src_query, src_engine)
             df = cx.read_sql(
                 remove_engine_driver(engine_url(src_engine)), query=src_query
             )

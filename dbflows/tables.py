@@ -8,13 +8,10 @@ import sqlalchemy as sa
 from dynamic_imports import class_inst
 from sqlalchemy import func as fn
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.engine import Engine
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 from sqlalchemy.schema import CreateTable
 
-from dbflows.utils import logger, schema_table, to_table
-
-from .base import DbObj
+from .utils import compile_statement, logger, schema_table, to_table
 
 tables_table = sa.Table(
     "tables",
@@ -23,71 +20,77 @@ tables_table = sa.Table(
     sa.Column("table_name", sa.Text),
 )
 
+metric_abbrs = {
+    "average": "avg",
+    "kurtosis": "kurt",
+    "stddev": "std",
+}
 
-def escape_table_name(name: str) -> str:
-    table = re.sub(r"\s+", "_", name)
+
+def format_table_name(name: str) -> str:
+    table = re.sub(r"\s+", "_", name).lower()
     table = re.sub(r"^[0-9]", lambda m: "_" + m.group(), table)
+    for metric, abbr in metric_abbrs.items():
+        table = table.replace(metric, abbr)
     return table
 
 
-# TODO HypterTable class?
+# TODO HypterTable
 # SELECT add_compression_policy('table name', INTERVAL '7 days');
 # ALTER TABLE td_ameritrade.option_payloads_tz SET (timescaledb.compress, timescaledb.compress_orderby = 'updated DESC');
 # https://docs.postgres.com/timescaledb/latest/how-to-guides/compression/about-compression/
 # https://docs.timescale.com/api/latest/compression/
 
 
-class Table(DbObj):
-    def __init__(self, table: sa.Table) -> None:
-        self.table = table
-
-    @property
-    def name(self) -> str:
-        return self.table.name
-
-    def create(self, engine: Engine, recreate: bool = False):
-        with engine.begin() as conn:
-            table_create(conn, self.table, recreate)
-
-    def drop(self, engine: Engine, cascade: bool = False):
-        self.drop_table(engine, schema_table(self.table), cascade)
-
-    @staticmethod
-    def drop_table(engine: Engine, schema_table: str, cascade: bool = False):
-        logger.info("Dropping table %s", schema_table)
-        statement = f"DROP TABLE {schema_table}"
-        if cascade:
-            statement += " CASCADE"
-        with engine.begin() as conn:
-            conn.execute(sa.text(statement))
-
-    @staticmethod
-    def list_all(
-        engine: Engine, schema: Optional[str] = None, like_pattern: Optional[str] = None
-    ) -> List[str]:
-        query = sa.select(
-            fn.concat(tables_table.c.table_schema, ".", tables_table.c.table_name)
-        )
-        if schema:
-            query = query.where(tables_table.c.table_schema == schema)
-        if like_pattern:
-            query = query.where(tables_table.c.table_name.like(like_pattern))
-        with engine.begin() as conn:
-            existing_tables = list(conn.execute(query).scalars())
-        return existing_tables
+def drop_table_statement(schema_table: str, cascade: bool = False) -> str:
+    statement = f"DROP TABLE {schema_table}"
+    if cascade:
+        statement += " CASCADE"
+    return statement
 
 
-async def table_create(
+def list_tables_statement(
+    schema: Optional[str] = None, like_pattern: Optional[str] = None
+) -> str:
+    """Query all tables in the database. Returns scalars."""
+    query = sa.select(
+        fn.concat(tables_table.c.table_schema, ".", tables_table.c.table_name)
+    )
+    if schema:
+        query = query.where(tables_table.c.table_schema == schema)
+    if like_pattern:
+        query = query.where(tables_table.c.table_name.like(like_pattern))
+    return compile_statement(query)
+
+
+def table_exists_query(table: sa.Table) -> str:
+    """Check if a table exists in the database. Returns scalar."""
+    return compile_statement(
+        sa.select(
+            sa.exists(sa.text("1"))
+            .select_from(tables_table)
+            .where(
+                tables_table.c.table_schema == table.schema,
+                tables_table.c.table_name == table.name,
+            )
+        ),
+    )
+
+
+async def create_tables(
     conn,
     create_from: Union[sa.Table, DeclarativeMeta, ModuleType, Sequence],
     recreate: bool = False,
-):
+) -> List[sa.Table]:
     """Create a table in the database.
 
     Args:
         conn: Connection to use for executing SQL statements.
         create_from (Union[sa.Table, Sequence[sa.Table], ModuleType]): The entity or table object to create a database table for.
         recreate (bool): If table exists, drop it and recreate. Defaults to False.
+
+    Returns:
+        List[Union[sa.Table, DeclarativeMeta]]: The created tables.
     """
     if isinstance(create_from, (sa.Table, DeclarativeMeta)):
         tables = [create_from]
@@ -101,8 +104,18 @@ async def table_create(
         len(tables),
         pformat([schema_table(t) for t in tables]),
     )
+    created_tables = []
     for table in tables:
         table = to_table(table)
+        exists = await conn.fetchval(table_exists_query(table))
+        if exists:
+            continue
+        # create referenced tables first.
+        for col in table.columns.values():
+            for fk in col.foreign_keys:
+                fk_tbl = fk.column.table
+                logger.info("Checking foreign key table %s", schema_table(fk_tbl))
+                await create_tables(conn, fk_tbl, recreate)
         if schema := table.schema:
             # create schema if needed.
             await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
@@ -131,6 +144,8 @@ async def table_create(
         await conn.execute(str(statement))
         # create hypertable if needed.
         await create_hypertable(conn, table)
+        created_tables.append(table)
+    return created_tables
 
 
 async def create_hypertable(conn, table: Union[sa.Table, DeclarativeMeta]) -> None:

@@ -11,7 +11,7 @@ from sqlalchemy.sql.expression import cast
 
 from dbflows.utils import logger, schema_table
 
-from .base import DbObj, query_kwargs
+from .utils import DbObj, query_kwargs
 
 meta = sa.MetaData(schema="timescaledb_information")
 

@@ -9,7 +9,7 @@ from quicklogs import get_logger
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 
-from .components import table_create
+from .tables import create_tables
 from .utils import compile_statement, get_connection_pool, schema_table, to_table
 
 
@@ -205,7 +205,7 @@ class PgLoader:
             )
         # create table if it doesn't already exist.
         async with self.pool.acquire() as conn:
-            await table_create(conn=conn, create_from=self.table)
+            await create_tables(conn=conn, create_from=self.table)
         return self
 
     async def load_row(self, row: Dict[str, Any] = None, **kwargs):

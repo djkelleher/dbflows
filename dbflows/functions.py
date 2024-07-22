@@ -6,8 +6,8 @@ from sqlalchemy.engine import Compiled
 
 from dbflows.utils import logger, split_schema_table
 
-from .base import DbObj
 from .schedule import SchedJob
+from .utils import DbObj
 
 routines_table = sa.Table(
     "routines",

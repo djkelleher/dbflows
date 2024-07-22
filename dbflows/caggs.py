@@ -9,7 +9,7 @@ from sqlalchemy.sql.functions import _FunctionGenerator
 
 from dbflows.utils import logger, next_time_occurrence, schema_table
 
-from .base import query_kwargs
+from .utils import query_kwargs
 from .views import MaterializedView
 
 cagg_meta_table = sa.Table(

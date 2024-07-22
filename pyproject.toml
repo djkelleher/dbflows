@@ -20,15 +20,14 @@ dependencies = [
     "quicklogs",
     "dynamic-imports",
     "asyncclick",
-    "xxhash",
     "tqdm",
     "pydantic>=2.0.0",
     "cytoolz",
     "connectorx",
     "pandas>=2.0.0",
     "asyncpg",
-    "psycopg[binary]",
     "ujson",
+    "duckdb>=1.0.0",
 ]
 
 [project.optional-dependencies]
