@@ -1,23 +1,23 @@
+import pickle
 import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from subprocess import run
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 from zoneinfo import ZoneInfo
-from xxhash import xxh32
-import pickle
 
-from fileflows.s3 import S3Cfg, is_s3_path
 import asyncpg
 import duckdb
 import sqlalchemy as sa
 from async_lru import alru_cache
+from fileflows.s3 import S3Cfg, is_s3_path
 from pydantic import PostgresDsn, validate_call
 from quicklogs import get_logger
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Compiled, Engine
 from sqlalchemy.ext.asyncio.engine import AsyncEngine
 from sqlalchemy.orm.decl_api import DeclarativeMeta
+from xxhash import xxh32
 
 logger = get_logger("dbflows", stdout=True)
 
@@ -348,8 +348,8 @@ def duckdb_copy_to_csv(
         ]
         if http_re.match(endpoint):
             secret.append("URL_STYLE path")
-        if s3_cfg.region:
-            secret.append(f"REGION '{s3_cfg.region}'")
+        if s3_cfg.s3_region:
+            secret.append(f"REGION '{s3_cfg.s3_region}'")
         s3_cfg_id = xxh32(pickle.dumps(s3_cfg)).hexdigest()
         duckdb.execute(
             f"CREATE SECRET IF NOT EXISTS dbflows_s3_{s3_cfg_id} ({','.join(secret)});"
