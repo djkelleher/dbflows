@@ -13,7 +13,7 @@ from quicklogs import get_logger
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 from tqdm import tqdm
 
-from .meta import create_export_meta
+from .meta import _create_export_meta
 from .tables import create_tables
 from .utils import (
     compile_statement,
@@ -147,7 +147,7 @@ def copy_table_data(
         p.start()
 
     if n_workers > 1 and (slice_column is not None or partition_column is not None):
-        for meta in create_export_meta(
+        for meta in _create_export_meta(
             table=src,
             engine=src_engine,
             save_locs=None,

@@ -3,10 +3,10 @@ from collections import defaultdict
 import pandas as pd
 import pytest
 import sqlalchemy as sa
-
-from dbflows.export import export_table
-from dbflows.meta import ExportMeta
 from fileflows.s3 import is_s3_path
+
+from dbflows.export import export
+from dbflows.meta import ExportMeta
 
 
 @pytest.mark.parametrize("primary_save_loc", ["s3", "disk"])
@@ -34,7 +34,7 @@ def test_export_partition_slices(
     partitions = ["_".join(faker.words(2, unique=True)) for _ in range(3)]
     for _ in range(3):
         add_table_rows(table, 10_000, partitions)
-        export_table(
+        export(
             table=table if sa_objs else table.name,
             engine=engine,
             save_locs=save_locs,
@@ -43,6 +43,7 @@ def test_export_partition_slices(
             file_max_size=file_max_size,
             file_stem_prefix="test",
             n_workers=n_workers,
+            # TODO change this.
             fo=file_ops,
         )
         # read partition data from database.

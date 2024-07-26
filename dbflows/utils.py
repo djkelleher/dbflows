@@ -4,8 +4,12 @@ from pathlib import Path
 from subprocess import run
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 from zoneinfo import ZoneInfo
+from xxhash import xxh32
+import pickle
 
+from fileflows.s3 import S3Cfg, is_s3_path
 import asyncpg
+import duckdb
 import sqlalchemy as sa
 from async_lru import alru_cache
 from pydantic import PostgresDsn, validate_call
@@ -29,6 +33,27 @@ _digit_start_re = re.compile(r"^\d")
 async def get_connection_pool(pg_url: str, max_conn: int = 10):
     """Get a (possibly shared) connection pool for the given PostgreSQL database."""
     return await asyncpg.create_pool(dsn=pg_url, max_size=max_conn)
+
+
+def size_in_bytes(mem_size: str) -> int:
+    """Convert a memory size string to bytes."""
+    if not (n_units := re.search(r"\d+(?:\.\d+)?", mem_size)):
+        raise ValueError(f"Could not parse memory size: {mem_size}")
+    n_units = n_units.group()
+    unit_type = mem_size.replace(n_units, "").strip().lower()
+    if unit_type in ("b", "byte", "bytes"):
+        return int(n_units)
+    if unit_type == "kb":
+        exp = 1
+    elif unit_type == "mb":
+        exp = 2
+    elif unit_type == "gb":
+        exp = 3
+    elif unit_type == "tb":
+        exp = 4
+    else:
+        raise ValueError(f"Unknown memory unit: {unit_type}")
+    return round(float(n_units) * 1000**exp)
 
 
 def to_snake_case(name: str) -> str:
@@ -253,7 +278,7 @@ def table_updatable_columns(table: sa.Table) -> Set[str]:
     return {c.name for c in table.columns if c not in key_cols}
 
 
-def copy_to_csv(
+def psql_copy_to_csv(
     to_copy: Union[str, sa.Table, sa.select],
     save_path: Union[Path, str],
     engine: Union[str, Engine],
@@ -287,10 +312,50 @@ def copy_to_csv(
         logger.debug(info)
 
 
-def duckdb_table_to_csv(conn, export_dir, table_name: str):
-    conn.sql(
-        f"COPY (SELECT * FROM {table_name} order by time desc) TO '{export_dir}/{table_name}.csv' (HEADER, DELIMITER ',');"
+def duckdb_copy_to_csv(
+    to_copy: Union[str, sa.Table, sa.select],
+    schema_table: str,
+    save_path: str,
+    pg_url: str,
+    s3_cfg: Optional[S3Cfg] = None,
+):
+    pg_db_name = pg_url.split("/")[-1]
+    duckdb.execute(
+        f"ATTACH '{remove_engine_driver(pg_url)}' AS {pg_db_name} (TYPE POSTGRES)"
     )
+    to_copy = (
+        schema_table(to_copy)
+        if isinstance(to_copy, sa.Table)
+        else compile_statement(to_copy)
+    )
+    to_copy = re.sub(
+        r"(?<!FROM\s)" + re.escape(f"{schema_table}."), "", to_copy
+    ).replace(schema_table, f"{pg_db_name}.{schema_table}")
+    statement = f"COPY ({to_copy}) TO '{save_path}'"
+    if ".csv" in save_path:
+        statement += f" (HEADER, DELIMITER ',');"
+    elif save_path.endswith(".parquet"):
+        statement += f" (FORMAT PARQUET);"
+    if is_s3_path(save_path):
+        s3_cfg = s3_cfg or S3Cfg()
+        http_re = re.compile(r"^https?://")
+        endpoint = s3_cfg.s3_endpoint_url.unicode_string()
+        secret = [
+            "TYPE S3",
+            f"KEY_ID '{s3_cfg.aws_access_key_id}'",
+            f"SECRET '{s3_cfg.aws_secret_access_key.get_secret_value()}'",
+            f"ENDPOINT '{http_re.sub('', endpoint).rstrip('/')}'",
+        ]
+        if http_re.match(endpoint):
+            secret.append("URL_STYLE path")
+        if s3_cfg.region:
+            secret.append(f"REGION '{s3_cfg.region}'")
+        s3_cfg_id = xxh32(pickle.dumps(s3_cfg)).hexdigest()
+        duckdb.execute(
+            f"CREATE SECRET IF NOT EXISTS dbflows_s3_{s3_cfg_id} ({','.join(secret)});"
+        )
+
+    duckdb.execute(statement)
 
 
 def query_kwargs(kwargs) -> str:

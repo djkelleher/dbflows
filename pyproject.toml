@@ -28,6 +28,7 @@ dependencies = [
     "asyncpg",
     "ujson",
     "duckdb>=1.0.0",
+    "xxhash",
 ]
 
 [project.optional-dependencies]

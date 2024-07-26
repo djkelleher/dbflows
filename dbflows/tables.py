@@ -54,7 +54,9 @@ def list_tables_statement(
 ) -> str:
     """Query all tables in the database. Returns scalars."""
     query = sa.select(
-        fn.concat(tables_table.c.table_schema, ".", tables_table.c.table_name)
+        fn.concat(tables_table.c.table_schema, ".", tables_table.c.table_name).label(
+            "table"
+        )
     )
     if schema:
         query = query.where(tables_table.c.table_schema == schema)

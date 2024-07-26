@@ -1,15 +1,15 @@
 import pandas as pd
 import pytest
 import sqlalchemy as sa
-
-from dbflows.export import export_table
-from dbflows.meta import ExportMeta
 from fileflows.s3 import is_s3_path
+
+from dbflows.export import export
+from dbflows.meta import ExportMeta
 
 
 @pytest.mark.parametrize("primary_save_loc", ["s3", "disk"])
 @pytest.mark.parametrize("n_workers", [1, 4])
-def test_export_table(
+def test_export(
     add_table_rows,
     save_locations,
     engine,
@@ -24,7 +24,7 @@ def test_export_table(
     save_locs = save_locations(primary_save_loc)
     for _ in range(3):
         add_table_rows(table)
-        export_table(
+        export(
             table=table,
             engine=engine,
             save_locs=save_locs,
@@ -56,9 +56,7 @@ def test_export_table(
                 names=[c.name for c in table.columns],
                 parse_dates=["datetime"],
                 storage_options=(
-                    file_ops.s3.storage_options
-                    if is_s3_path(file)
-                    else None
+                    file_ops.s3.storage_options if is_s3_path(file) else None
                 ),
             ).astype(db_df.dtypes)
             # sort for comparisons.

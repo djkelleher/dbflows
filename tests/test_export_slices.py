@@ -1,10 +1,10 @@
 import pandas as pd
 import pytest
 import sqlalchemy as sa
-
-from dbflows.export import export_table
-from dbflows.meta import ExportMeta
 from fileflows.s3 import is_s3_path
+
+from dbflows.export import export
+from dbflows.meta import ExportMeta
 
 
 @pytest.mark.parametrize("primary_save_loc", ["s3", "disk"])
@@ -28,7 +28,7 @@ def test_export_slices(
 
     for _ in range(3):
         add_table_rows(table, 10_000)
-        export_table(
+        export(
             table=table,
             engine=engine,
             save_locs=save_locs,

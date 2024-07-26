@@ -2,12 +2,12 @@ import pandas as pd
 import pytest
 import sqlalchemy as sa
 
-from dbflows.utils import copy_to_csv
+from dbflows.utils import psql_copy_to_csv
 
 
 @pytest.mark.parametrize("suffix", [".csv", ".csv.gz"])
 @pytest.mark.parametrize("to_copy", ["table", "select"])
-def test_copy_to_csv(
+def test_psql_copy_to_csv(
     engine,
     temp_dir,
     add_table_rows,
@@ -28,7 +28,7 @@ def test_copy_to_csv(
     with engine.begin() as conn:
         db_df = pd.read_sql_query(query, conn)
     save_path = temp_dir / f"{table.name}{suffix}"
-    copy_to_csv(
+    psql_copy_to_csv(
         to_copy=to_copy,
         save_path=save_path,
         engine=engine,
@@ -57,14 +57,14 @@ def test_append_csv(engine, temp_dir, add_table_rows, partition_slice_table, suf
 
     save_path = temp_dir / f"{table.name}{suffix}"
     # copy first 200 rows.
-    copy_to_csv(
+    psql_copy_to_csv(
         to_copy=copy_200,
         save_path=save_path,
         engine=engine,
         append=True,
     )
     # copy all remaining rows.
-    copy_to_csv(
+    psql_copy_to_csv(
         to_copy=sa.select(table)
         .where(table.c.datetime > greatest_time)
         .order_by(table.c.datetime.asc()),

@@ -7,14 +7,20 @@ from typing import Optional, Sequence, Union
 
 import sqlalchemy as sa
 from fileflows import Files
-from fileflows.s3 import is_s3_path
+from fileflows.s3 import S3Cfg, is_s3_path
 from sqlalchemy.engine import Engine
 
-from .meta import ExportMeta, create_export_meta
-from .utils import copy_to_csv, logger, schema_table
+from .meta import ExportMeta, _create_export_meta
+from .utils import (
+    duckdb_copy_to_csv,
+    engine_url,
+    logger,
+    psql_copy_to_csv,
+    schema_table,
+)
 
 
-def export_table(
+def export(
     table: Union[str, sa.Table],
     engine: Union[str, Engine],
     save_locs: Union[Union[Path, str], Sequence[Union[Path, str]]],
@@ -23,7 +29,7 @@ def export_table(
     file_max_size: Optional[str] = None,
     file_stem_prefix: Optional[str] = None,
     n_workers: Optional[int] = None,
-    fo: Optional[Files] = None,
+    s3_cfg: Optional[S3Cfg] = None,
 ):
     """Export a database table.
 
@@ -36,9 +42,9 @@ def export_table(
         file_max_size (Optional[str], optional): Desired size of export files. Must have suffix 'bytes', 'kb', 'mb', 'gb', 'tb'. (e.g. '500mb'). If None, no limit will be placed on file size. Defaults to None.
         file_stem_prefix (Optional[str], optional): A prefix put on every export file name. Defaults to None.
         n_workers (Optional[int], optional): Number of export tasks to run simultaneously.
-        fo (Optional[Files], optional): File operations interface for s3/local disk.
+        s3_cfg (Optional[S3Cfg], optional): Parameters for s3. Defaults to None.
     """
-    exports_meta = create_export_meta(
+    exports_meta = _create_export_meta(
         table=table,
         engine=engine,
         save_locs=save_locs,
@@ -46,17 +52,30 @@ def export_table(
         partition_column=partition_column,
         file_max_size=file_max_size,
         file_stem_prefix=file_stem_prefix,
-        fo=fo,
+        s3_cfg=s3_cfg,
     )
-    # run all export tasks.
-    export_all(
-        engine=engine,
-        exports=exports_meta,
-        append=slice_column is not None,
-        save_locs=save_locs,
-        n_workers=n_workers,
-        fo=fo,
-    )
+    append = slice_column is not None
+    if slice_column is None and partition_column is None and file_max_size is None:
+        # entire table is being exported.
+        exports = list(exports_meta)
+        assert len(exports) == 1
+        _export(
+            meta=exports[0],
+            engine=engine,
+            append=append,
+            save_locs=save_locs,
+            s3_cfg=s3_cfg,
+        )
+    else:
+        # run all export tasks.
+        _run_export_tasks(
+            engine=engine,
+            exports=exports_meta,
+            append=append,
+            save_locs=save_locs,
+            n_workers=n_workers,
+            s3_cfg=s3_cfg,
+        )
 
 
 def export_hypertable_chunks(
@@ -64,7 +83,7 @@ def export_hypertable_chunks(
     table: Union[sa.Table, str],
     save_locs: Union[Union[Path, str], Sequence[Union[Path, str]]],
     n_workers: Optional[int] = None,
-    fo: Optional[Files] = None,
+    s3_cfg: Optional[S3Cfg] = None,
 ):
     """Export all chunks of a TimescaleDB hypertable. (one file per chunk)
 
@@ -89,25 +108,25 @@ def export_hypertable_chunks(
         )
         for chunk in chunks
     ]
-    export_all(
+    _run_export_tasks(
         engine,
         exports,
         append=False,
         save_locs=save_locs,
         n_workers=n_workers,
-        fo=fo,
+        s3_cfg=s3_cfg,
     )
 
 
-def export(
+def _export(
     meta: ExportMeta,
     engine: Engine,
     append: bool,
     save_locs: Union[Union[Path, str], Sequence[Union[Path, str]]],
-    fo: Optional[Files] = None,
+    s3_cfg: Optional[S3Cfg] = None,
 ):
     """Export data as specified in `meta`."""
-    fo = fo or Files()
+    fo = Files(s3_cfg=s3_cfg)
     save_locs = [save_locs] if isinstance(save_locs, (str, Path)) else save_locs
     primary_save_loc, *backup_save_locs = save_locs
     for loc in save_locs:
@@ -126,14 +145,23 @@ def export(
             # the file being appended to is already a local file.
             save_path = meta.path
     # if primary save location is s3, we need to save to a local file first, then move it.
-    elif is_s3_path(primary_save_loc):
-        save_path = f"{TemporaryDirectory().name}/{created_file_name}"
+    # elif is_s3_path(primary_save_loc):
+    #    save_path = f"{TemporaryDirectory().name}/{created_file_name}"
     else:
         # primary save location is a local file, so save directly to primary location.
         save_path = prim_loc_file
-    copy_to_csv(
-        to_copy=meta.statement, engine=engine, save_path=save_path, append=append
-    )
+    if append:
+        psql_copy_to_csv(
+            to_copy=meta.statement, engine=engine, save_path=save_path, append=append
+        )
+    else:
+        duckdb_copy_to_csv(
+            to_copy=meta.statement,
+            schema_table=meta.schema_table,
+            save_path=save_path,
+            pg_url=engine_url(engine),
+            s3_cfg=s3_cfg,
+        )
     save_path_head, save_path_name = os.path.split(save_path)
     # If we appended to existing file and the file name includes end time, then the file name will need to be updated.
     if save_path_name != created_file_name:
@@ -148,7 +176,7 @@ def export(
         file = f"{bac_loc}/{created_file_name}"
         fo.copy(save_path, file)
         logger.info("Saved %s", file)
-    # if primary save location is s3, we need to move the file to s3.
+    # move to primary save location if needed.
     if save_path != prim_loc_file:
         fo.move(save_path, prim_loc_file)
     logger.info("Saved %s", prim_loc_file)
@@ -163,28 +191,28 @@ def export(
             fo.delete(bac_file)
 
 
-def export_all(
+def _run_export_tasks(
     engine: Engine,
     exports: Sequence[ExportMeta],
     append: bool,
     save_locs: Union[Union[Path, str], Sequence[Union[Path, str]]],
     n_workers: Optional[int] = None,
-    fo: Optional[Files] = None,
+    s3_cfg: Optional[S3Cfg] = None,
 ):
     """Export a data file for each `ExportMeta` in `exports`."""
+
     if n_workers is None:
         n_workers = int(os.cpu_count() * 0.8)
     logger.info("Starting exports with %i workers", n_workers)
-
     with ThreadPoolExecutor(max_workers=n_workers) as p:
         tasks = [
             p.submit(
-                export,
+                _export,
                 meta=meta,
                 engine=engine,
                 append=append,
                 save_locs=save_locs,
-                fo=fo,
+                s3_cfg=s3_cfg,
             )
             for meta in exports
         ]

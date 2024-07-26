@@ -1,5 +1,6 @@
 import re
 from collections import defaultdict
+from pprint import pformat
 from types import ModuleType
 from typing import Optional, Sequence, Union
 
@@ -7,6 +8,7 @@ import duckdb
 import sqlalchemy as sa
 from fileflows.s3 import S3, S3Cfg
 from sqlalchemy.orm.decl_api import DeclarativeMeta
+from tqdm import tqdm
 
 from .tables import create_tables
 from .utils import get_connection_pool, logger, schema_table
@@ -41,18 +43,30 @@ async def initialize_db(
         return_as="urls",
         pattern=None,
     )
+    logger.info(
+        "Found %i files in %s %s.", len(files), files_bucket, files_partition or ""
+    )
     # map schame.table to file URL.
     table_file_urls = defaultdict(list)
     for f in files:
-        table_file_urls[re.search(r"T\(([^)]+)\)", f).group(1)].append(f)
+        if m := re.search(r"T\(([^)]+)\)", f):
+            table_file_urls[m.group(1)].append(f)
+        else:
+            logger.warning("Could not parse table name from %s", f)
     if not load_files_to_existing_tables:
         table_names = [schema_table(table) for table in created_tables]
         table_file_urls = {name: table_file_urls.get(name) for name in table_names}
     if not table_file_urls:
         logger.info("No files to load to database.")
         return
-    duckdb.execute(f"ATTACH '{pg_url}' AS pgdb (TYPE POSTGRES)")
+    pg_db_name = "trading"
+    duckdb.execute(f"ATTACH '{pg_url}' AS {pg_db_name} (TYPE POSTGRES)")
     for table_name, table_files in table_file_urls.items():
-        table_files = ",".join([f"'{f}'" for f in sorted(table_files)])
-        logger.info("Loading %i files to %s", len(table_files), table_name)
-        # f"SELECT * FROM read_csv([{table_files}], union_by_name = true);"
+        logger.info(
+            "Loading %i files to %s:\n%s",
+            len(table_files),
+            table_name,
+            pformat(table_files),
+        )
+        for file in tqdm(table_files):
+            duckdb.execute(f"COPY {pg_db_name}.{table_name} FROM '{file}';")

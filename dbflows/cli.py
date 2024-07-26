@@ -107,7 +107,7 @@ def export():
     default=None,
     help="Number of export tasks to run simultaneously.",
 )
-def _export_table(
+def _export(
     table,
     db_url,
     save_locs,
@@ -117,9 +117,9 @@ def _export_table(
     file_stem_prefix,
     n_workers,
 ):
-    from .export import export_table
+    from .export import export
 
-    export_table(
+    export(
         table=table,
         engine=db_url,
         save_locs=save_locs,
@@ -139,9 +139,9 @@ def _export_table(
 @click.argument("save-path", type=str)
 @click.option("--append", "-a", is_flag=True, help="Append to file if already exists.")
 def _export_query(query, db_url, save_path, append):
-    from .utils import copy_to_csv
+    from .utils import psql_copy_to_csv
 
-    copy_to_csv(
+    psql_copy_to_csv(
         to_copy=query,
         save_path=save_path,
         engine=db_url,

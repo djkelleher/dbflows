@@ -45,6 +45,16 @@ def pytest_addoption(parser):
     )
 
 
+@pytest.fixture
+def storage_options(request):
+    # TODO use this.
+    return {
+        "key": request.config.getoption("--minio-user"),
+        "secret": request.config.getoption("--minio-password"),
+        "client_kwargs": {"endpoint_url": request.config.getoption("--minio-endpoint")},
+    }
+
+
 @pytest_asyncio.fixture
 async def temp_db(request) -> str:
     """Create a temporary database and return its URL."""

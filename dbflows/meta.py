@@ -11,13 +11,14 @@ from typing import ClassVar, Generator, List, Optional, Sequence, Union
 import pandas as pd
 import sqlalchemy as sa
 from fileflows import Files
+from fileflows.s3 import S3Cfg
 from sqlalchemy import func as fn
 from sqlalchemy.engine import Engine
 from tqdm import tqdm
 
-from .utils import copy_to_csv, logger, range_slices
+from .utils import logger, psql_copy_to_csv, range_slices
 from .utils import schema_table as get_schema_table
-from .utils import split_schema_table
+from .utils import size_in_bytes, split_schema_table
 
 SCHEMA_NAME = "exports"
 SA_META = sa.MetaData(schema=SCHEMA_NAME)
@@ -44,27 +45,6 @@ def _create_file_name_re() -> re.Pattern:
             ]
         )
     )
-
-
-def size_in_bytes(mem_size: str) -> int:
-    """Convert a memory size string to bytes."""
-    if not (n_units := re.search(r"\d+(?:\.\d+)?", mem_size)):
-        raise ValueError(f"Could not parse memory size: {mem_size}")
-    n_units = n_units.group()
-    unit_type = mem_size.replace(n_units, "").strip().lower()
-    if unit_type in ("b", "byte", "bytes"):
-        return int(n_units)
-    if unit_type == "kb":
-        exp = 1
-    elif unit_type == "mb":
-        exp = 2
-    elif unit_type == "gb":
-        exp = 3
-    elif unit_type == "tb":
-        exp = 4
-    else:
-        raise ValueError(f"Unknown memory unit: {unit_type}")
-    return round(float(n_units) * 1000**exp)
 
 
 @dataclass
@@ -198,7 +178,7 @@ def target_export_row_count(
         query = sa.select(table)
         if n_rows > sample_n_rows:
             query = query.limit(sample_n_rows)
-        copy_to_csv(
+        psql_copy_to_csv(
             to_copy=query,
             save_path=sample_file,
             engine=engine,
@@ -226,7 +206,7 @@ def target_export_row_count(
     return row_count
 
 
-def create_export_meta(
+def _create_export_meta(
     table: Union[str, sa.Table],
     engine: Union[str, Engine],
     save_locs: Union[Union[Path, str], Sequence[Union[Path, str]]],
@@ -234,18 +214,8 @@ def create_export_meta(
     partition_column: Optional[Union[str, sa.Column]] = None,
     file_max_size: Optional[str] = None,
     file_stem_prefix: Optional[str] = None,
-    fo: Optional[Files] = None,
+    s3_cfg: Optional[S3Cfg] = None,
 ) -> Generator[None, ExportMeta, None]:
-    """Export data from a database table.
-
-    Args:
-        table (sa.Table): The table or schema-qualified table name to export data from.
-        save_locs (Optional[ Union[Union[Path, str], Sequence[Union[Path, str]]] ], optional): Bucket(s) (format: s3://{bucket name}) and/or local director(y|ies) to save files to.
-        slice_column (Optional[sa.Column], optional): A column with some kind of sequential ordering (e.g. time) that can be used sort rows within the table or a partition. Defaults to None.
-        partition_column (Optional[sa.Column], optional): A column used to partition table data (e.g. a categorical value). Defaults to None.
-        file_max_size (Optional[str], optional): Desired size of export files. Must have suffix 'bytes', 'kb', 'mb', 'gb', 'tb'. (e.g. '500mb'). If None, no limit will be placed on file size. Defaults to None.
-        file_stem_prefix (Optional[str], optional): A prefix put on every export file name. Defaults to None.
-    """
     if isinstance(table, str):
         schema_table = table if "." in table else f"public.{table}"
         schema, table_name = split_schema_table(schema_table)
@@ -270,7 +240,7 @@ def create_export_meta(
 
     if not isinstance(save_locs, (list, tuple, set)):
         save_locs = [save_locs]
-    fo = fo or Files()
+    fo = Files(s3_cfg=s3_cfg)
     # make sure columns are SQLAlchemy columns.
     if isinstance(slice_column, str):
         slice_column = table.columns[slice_column]

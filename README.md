@@ -27,7 +27,7 @@ Features:
 
 ### Examples
 ```py
-from dbflows import export_table
+from dbflows import export
 import sqlalchemy as sa
 # the table to export data from
 my_table = sa.Table(
@@ -44,7 +44,7 @@ url = "postgres://user:password@hostname:port/database-name"
 ```
 #### Export entire table to a single file.
 ```py
-export_table(
+export(
     table=my_table,
     engine=url, # or sa.engine
     save_locs=save_locs
@@ -61,7 +61,7 @@ s3://my-bucket/my_table_exports \
 
 #### Export 500 MB CSVs, sorted and sliced on `inserted` datetime column.
 ```py
-export_table(
+export(
     table=my_table,
     engine=url, # or sa.engine
     save_locs=save_locs,
@@ -72,7 +72,7 @@ export_table(
 
 #### Create a CSV export for each unique category in table.
 ```py
-export_table(
+export(
     table=my_table,
     engine=url, # or sa.engine
     save_locs=save_locs,
@@ -92,7 +92,7 @@ s3://my-bucket/my_table_exports \
 
 #### export 500 MB CSVs for each unique category, sorted and sliced on `inserted` datetime column.
 ```py
-export_table(
+export(
     table=my_table,
     engine=url, # or sa.engine
     save_locs=save_locs,
