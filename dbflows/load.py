@@ -10,7 +10,9 @@ from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 
 from .tables import create_tables
-from .utils import compile_statement, get_connection_pool, schema_table, to_table
+from .utils import compile_statement, get_connection_pool
+from .utils import schema_table as get_schema_table
+from .utils import to_table
 
 
 async def load_rows(
@@ -80,6 +82,7 @@ class PgLoader:
         """
         self = cls()
         self.table = to_table(table)
+        self.schema_table = get_schema_table(self.table)
         self.pool = await get_connection_pool(pg_url, max_conn=max_conn)
         self.row_batch_size = row_batch_size
         self.on_duplicate_key_update = on_duplicate_key_update
@@ -186,7 +189,7 @@ class PgLoader:
             ]
 
         key_cols = ",".join([f'"{c}"' for c in self.key_columns])
-        insert_statement = f"INSERT INTO {schema_table(self.table)} ({{}}) VALUES {{}}"
+        insert_statement = f"INSERT INTO {self.schema_table} ({{}}) VALUES {{}}"
         if self.on_duplicate_key_update:
             # update provided columns.
             update_cols = ",".join(
@@ -229,8 +232,9 @@ class PgLoader:
             return
         # upsert all batches.
         self.logger.info(
-            "Loading %i rows to the database.",
+            "Loading %i rows to %s.",
             len(rows),
+            self.schema_table,
         )
         if self.group_by_columns_present:
             row_groups = groupby_columns(rows)
@@ -247,7 +251,6 @@ class PgLoader:
             ]
         for task in asyncio.as_completed(tasks):
             await task
-            self.logger.info("Finished loading batch.")
 
     def filter_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Apply all filter functions to rows.
