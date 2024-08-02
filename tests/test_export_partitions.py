@@ -3,8 +3,8 @@ import pytest
 import sqlalchemy as sa
 from fileflows.s3 import is_s3_path
 
-from dbflows.export import export
-from dbflows.meta import ExportMeta
+from dbflows.export.append import export
+from dbflows.export.hive import ExportMeta
 
 
 @pytest.mark.parametrize("primary_save_loc", ["s3", "disk"])

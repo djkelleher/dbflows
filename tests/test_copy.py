@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 import sqlalchemy as sa
 
-from dbflows.utils import psql_copy_to_csv
+from dbflows.export.utils import psql_copy_to_csv
 
 
 @pytest.mark.parametrize("suffix", [".csv", ".csv.gz"])

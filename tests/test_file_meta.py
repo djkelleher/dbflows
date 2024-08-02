@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from dbflows.meta import ExportMeta, _create_file_name_re
+from dbflows.export.hive import ExportMeta, _create_file_name_re
 
 
 @pytest.fixture

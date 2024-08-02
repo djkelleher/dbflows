@@ -18,7 +18,7 @@ from fileflows import Files, S3Cfg
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.ext.asyncio.engine import AsyncEngine
 
-from dbflows.meta import ExportMeta
+from dbflows.export.hive import ExportMeta
 from dbflows.utils import driver_pg_url, schema_table
 
 

@@ -43,7 +43,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["dbflows", "dbflows.components"]
+packages = ["dbflows"]
 
 [project.scripts]
 dbflows = "dbflows.cli:run_cli"
