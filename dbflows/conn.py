@@ -2,10 +2,10 @@ from typing import Any, List
 
 import sqlalchemy as sa
 
-from .utils import compile_statement, get_connection_pool
+from .utils import compile_statement, get_connection_pool, logger
 
 
-class PgReader:
+class PgPoolConn:
     @classmethod
     async def create(cls, pg_url: str):
         self = cls()
@@ -27,3 +27,7 @@ class PgReader:
     async def fetchval(self, query: sa.Select) -> List[Any]:
         async with self.pool.acquire() as conn:
             return await conn.fetchval(compile_statement(query))
+
+    async def close(self):
+        logger.info("Closing asyncpg connection pool.")
+        await self.pool.close()

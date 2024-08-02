@@ -1,23 +1,17 @@
-import pickle
 import re
 from datetime import date, datetime, timedelta
-from pathlib import Path
-from subprocess import run
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 from zoneinfo import ZoneInfo
 
 import asyncpg
-import duckdb
 import sqlalchemy as sa
 from async_lru import alru_cache
-from fileflows.s3 import S3Cfg, is_s3_path
 from pydantic import PostgresDsn, validate_call
 from quicklogs import get_logger
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Compiled, Engine
 from sqlalchemy.ext.asyncio.engine import AsyncEngine
 from sqlalchemy.orm.decl_api import DeclarativeMeta
-from xxhash import xxh32
 
 logger = get_logger("dbflows", stdout=True)
 
@@ -190,8 +184,12 @@ def split_schema_table(table: str) -> Tuple[str, str]:
     )
 
 
-def schema_table(table: sa.Table) -> str:
+def schema_table(table: sa.Table | str) -> str:
     """Get the schema qualified table name (format: schema.table)"""
+    if isinstance(table, str):
+        if "." in table:
+            return table
+        return f"public.{table}"
     if not isinstance(table, sa.Table):
         if not hasattr(table, "__table__"):
             raise ValueError(f"Invalid table type ({type(table)}): {table}")
@@ -276,86 +274,6 @@ async def set_pg_timezone(
 def table_updatable_columns(table: sa.Table) -> Set[str]:
     key_cols = list(table.primary_key.columns)
     return {c.name for c in table.columns if c not in key_cols}
-
-
-def psql_copy_to_csv(
-    to_copy: Union[str, sa.Table, sa.select],
-    save_path: Union[Path, str],
-    engine: Union[str, Engine],
-    append: bool,
-):
-    """Copy a table or query result to a csv file."""
-    to_copy = (
-        schema_table(to_copy)
-        if isinstance(to_copy, sa.Table)
-        else f"({compile_statement(to_copy)})"
-    )
-    save_path = Path(save_path)
-    if not save_path.exists() and save_path.suffix != ".gz":
-        copy_to = f"'{save_path}'"
-    else:
-        program = "gzip" if save_path.suffix == ".gz" else "cat"
-        operator = ">>" if append else ">"
-        copy_to = f"""PROGRAM '{program} {operator} "{save_path}"'"""
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    db_url = remove_engine_driver(engine_url(engine))
-    psql_code = " ".join(
-        [r"\copy", to_copy, "TO", copy_to, "DELIMITER ',' CSV"]
-    ).replace('"', '\\"')
-    cmd = f"""psql "{db_url}" -c "{psql_code}\""""
-    # cmd = f"COPY ({to_copy}) TO {copy_to} DELIMITER ',' CSV HEADER"
-    logger.info("Copying to CSV: %s", cmd)
-    result = run(cmd, capture_output=True, text=True, shell=True)
-    if err := result.stderr:
-        logger.error(err)
-    if info := result.stdout:
-        logger.debug(info)
-
-
-def duckdb_copy_to_csv(
-    to_copy: Union[str, sa.Table, sa.select],
-    schema_table: str,
-    save_path: str,
-    pg_url: str,
-    s3_cfg: Optional[S3Cfg] = None,
-):
-    pg_db_name = pg_url.split("/")[-1]
-    duckdb.execute(
-        f"ATTACH '{remove_engine_driver(pg_url)}' AS {pg_db_name} (TYPE POSTGRES)"
-    )
-    to_copy = (
-        schema_table(to_copy)
-        if isinstance(to_copy, sa.Table)
-        else compile_statement(to_copy)
-    )
-    to_copy = re.sub(
-        r"(?<!FROM\s)" + re.escape(f"{schema_table}."), "", to_copy
-    ).replace(schema_table, f"{pg_db_name}.{schema_table}")
-    statement = f"COPY ({to_copy}) TO '{save_path}'"
-    if ".csv" in save_path:
-        statement += f" (HEADER, DELIMITER ',');"
-    elif save_path.endswith(".parquet"):
-        statement += f" (FORMAT PARQUET);"
-    if is_s3_path(save_path):
-        s3_cfg = s3_cfg or S3Cfg()
-        http_re = re.compile(r"^https?://")
-        endpoint = s3_cfg.s3_endpoint_url.unicode_string()
-        secret = [
-            "TYPE S3",
-            f"KEY_ID '{s3_cfg.aws_access_key_id}'",
-            f"SECRET '{s3_cfg.aws_secret_access_key.get_secret_value()}'",
-            f"ENDPOINT '{http_re.sub('', endpoint).rstrip('/')}'",
-        ]
-        if http_re.match(endpoint):
-            secret.append("URL_STYLE path")
-        if s3_cfg.s3_region:
-            secret.append(f"REGION '{s3_cfg.s3_region}'")
-        s3_cfg_id = xxh32(pickle.dumps(s3_cfg)).hexdigest()
-        duckdb.execute(
-            f"CREATE SECRET IF NOT EXISTS dbflows_s3_{s3_cfg_id} ({','.join(secret)});"
-        )
-
-    duckdb.execute(statement)
 
 
 def query_kwargs(kwargs) -> str:

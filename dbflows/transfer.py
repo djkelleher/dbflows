@@ -13,7 +13,7 @@ from quicklogs import get_logger
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 from tqdm import tqdm
 
-from .meta import _create_export_meta
+from .export.hive import _create_export_meta
 from .tables import create_tables
 from .utils import (
     compile_statement,

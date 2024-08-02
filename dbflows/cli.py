@@ -62,7 +62,7 @@ def export():
 
 
 @export.command(
-    "table",
+    "append",
     help="Export data from `table` (schema-qualified table) at `db-url`. Save to `save-locs` (Bucket(s) (format: s3://{bucket name}) and/or local director(y|ies) to save files to.).",
 )
 @click.argument("table", type=str)
@@ -107,7 +107,7 @@ def export():
     default=None,
     help="Number of export tasks to run simultaneously.",
 )
-def _export(
+def _export_append(
     table,
     db_url,
     save_locs,
@@ -117,9 +117,9 @@ def _export(
     file_stem_prefix,
     n_workers,
 ):
-    from .export import export
+    from .export.append import export_append
 
-    export(
+    export_append(
         table=table,
         engine=db_url,
         save_locs=save_locs,
@@ -139,7 +139,7 @@ def _export(
 @click.argument("save-path", type=str)
 @click.option("--append", "-a", is_flag=True, help="Append to file if already exists.")
 def _export_query(query, db_url, save_path, append):
-    from .utils import psql_copy_to_csv
+    from .export.utils import psql_copy_to_csv
 
     psql_copy_to_csv(
         to_copy=query,
@@ -176,7 +176,7 @@ def _export_hypertable_chunks(
     save_locs,
     n_workers,
 ):
-    from .export import export_hypertable_chunks
+    from .export.append import export_hypertable_chunks
 
     export_hypertable_chunks(
         engine=db_url,
