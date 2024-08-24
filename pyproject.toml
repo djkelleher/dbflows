@@ -1,6 +1,6 @@
 [project]
 name = "dbflows"
-version = "0.1.11"
+version = "0.2.0"
 description = "Database incremental exports, transfers, imports, ETL, creation / management"
 authors = [{ name = "Dan Kelleher", email = "kelleherjdan@gmail.com" }]
 license = { text = "MIT" }

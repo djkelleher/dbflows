@@ -43,7 +43,7 @@ class PgLoader:
         cls,
         table: Union[sa.Table, DeclarativeMeta],
         pg_url: str,
-        on_duplicate_key_update: Optional[Union[bool, List[str]]] = True,
+        on_duplicate_key_update: Optional[Union[bool, List[str]]] = None,
         key_columns: Optional[List[str]] = None,
         row_batch_size: int = 1500,
         duplicate_key_rows_keep: Optional[Literal["first", "last"]] = None,
@@ -64,7 +64,7 @@ class PgLoader:
         Args:
             table (Union[sa.Table, DeclarativeMeta]): The SQLAlchemy table or entity corresponding to the database table that rows will be loaded to.
             dsn (str): The PostgreSQL dsn connection string to the database.
-            on_duplicate_key_update (Union[bool, List[str]], optional): List of columns that should be updated when key columns exists, or True for all columns, False for no columns, None if duplicates should not be checked (i.e. a normal INSERT). Defaults to True.
+            on_duplicate_key_update (Union[bool, List[str]], optional): List of columns that should be updated when key columns exists, or True for all columns, False for no columns, None if duplicates should not be checked (i.e. a normal INSERT). Defaults to None.
             key_columns (Optional[List[str]], optional): List of key columns that should be used for on_duplicate_key_update. Default to primary key.
             row_batch_size (int): Number of rows to load per statement. Defaults to 1500.
             column_name_map (Optional[Dict[str, str]], optional): Map column name to desired column name. Defaults to None.
