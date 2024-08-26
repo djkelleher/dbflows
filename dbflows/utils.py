@@ -13,7 +13,7 @@ from sqlalchemy.engine import Compiled, Engine
 from sqlalchemy.ext.asyncio.engine import AsyncEngine
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 
-logger = get_logger("dbflows", stdout=True)
+logger = get_logger("dbflows", terminal=True)
 
 TimeT = Union[int, float, datetime, date]
 
