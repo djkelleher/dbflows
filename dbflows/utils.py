@@ -7,13 +7,14 @@ import asyncpg
 import sqlalchemy as sa
 from async_lru import alru_cache
 from pydantic import PostgresDsn, validate_call
-from quicklogs import get_logger
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Compiled, Engine
 from sqlalchemy.ext.asyncio.engine import AsyncEngine
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 
-logger = get_logger("dbflows", terminal=True)
+from quicklogs import get_logger
+
+logger = get_logger("dbflows")
 
 TimeT = Union[int, float, datetime, date]
 

@@ -17,7 +17,7 @@ dependencies = [
     "async_lru",
     "fileflows",
     "sqlalchemy>=2.0.0",
-    "quicklogs",
+    "quicklogs>=2.0.0",
     "dynamic-imports",
     "asyncclick",
     "tqdm",
