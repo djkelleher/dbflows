@@ -1,4 +1,3 @@
-import pickle
 import re
 from pathlib import Path
 from subprocess import run
@@ -6,7 +5,7 @@ from typing import Optional, Union
 
 import duckdb
 import sqlalchemy as sa
-from fileflows.s3 import S3Cfg, is_s3_path
+from fileflows import S3Cfg, create_duckdb_secret, is_s3_path
 from sqlalchemy.engine import Engine
 from xxhash import xxh32
 
@@ -96,24 +95,7 @@ def duckdb_copy_to_file(
     elif save_path.endswith(".parquet"):
         statement += f" (FORMAT PARQUET);"
     if is_s3_path(save_path):
-        s3_cfg = s3_cfg or S3Cfg()
-        http_re = re.compile(r"^https?://")
-        endpoint = s3_cfg.s3_endpoint_url.unicode_string()
-        secret = [
-            "TYPE S3",
-            f"KEY_ID '{s3_cfg.aws_access_key_id}'",
-            f"SECRET '{s3_cfg.aws_secret_access_key.get_secret_value()}'",
-            f"ENDPOINT '{http_re.sub('', endpoint).rstrip('/')}'",
-        ]
-        if http_re.match(endpoint):
-            secret.append("URL_STYLE path")
-        if s3_cfg.s3_region:
-            secret.append(f"REGION '{s3_cfg.s3_region}'")
-        s3_cfg_id = xxh32(pickle.dumps(s3_cfg)).hexdigest()
-        duckdb.execute(
-            f"CREATE SECRET IF NOT EXISTS dbflows_s3_{s3_cfg_id} ({','.join(secret)});"
-        )
+        create_duckdb_secret(s3_cfg)
     else:
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-
     duckdb.execute(statement)
