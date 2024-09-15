@@ -5,7 +5,6 @@ from typing import Optional, Union
 
 import duckdb
 import sqlalchemy as sa
-from fileflows import S3Cfg, create_duckdb_secret, is_s3_path
 from sqlalchemy.engine import Engine
 from xxhash import xxh32
 
@@ -16,6 +15,7 @@ from dbflows.utils import (
     remove_engine_driver,
     schema_table,
 )
+from fileflows import S3Cfg, create_duckdb_secret, is_s3_path
 
 
 def psql_copy_to_csv(
@@ -94,6 +94,7 @@ def duckdb_copy_to_file(
         statement += f" (HEADER, DELIMITER ',');"
     elif save_path.endswith(".parquet"):
         statement += f" (FORMAT PARQUET);"
+    # TODO use duck connection
     if is_s3_path(save_path):
         create_duckdb_secret(s3_cfg)
     else:
