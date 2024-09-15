@@ -24,13 +24,24 @@ class ExportLocation:
         self.save_loc = str(self.save_loc)
         self.files = Files(s3_cfg=self.s3_cfg)
 
+    @classmethod
+    def from_table_and_type(
+        cls,
+        table: str,
+        file_type: Literal["csv", "csv.gz", "parquet"],
+        save_loc: Union[Path, str],
+        s3_cfg: Optional[S3Cfg] = None,
+    ):
+        file_name = "/".join(split_schema_table(schema_table(table))) + f".{file_type}"
+        return cls(save_path=f"{save_loc}/{file_name}", s3_cfg=s3_cfg)
+
     @property
     def is_s3(self) -> bool:
-        return is_s3_path(self.save_loc)
+        return is_s3_path(self.save_path)
 
     def create(self):
         """make sure bucket or local directory exists."""
-        self.files.create(self.save_loc)
+        self.files.create(self.save_path)
 
 
 def export_table(
