@@ -193,7 +193,7 @@ class PgLoader:
         if self.on_duplicate_key_update:
             # update provided columns.
             update_cols = ",".join(
-                [f"{col}=EXCLUDED.{col}" for col in self.on_duplicate_key_update]
+                [f'"{col}"=EXCLUDED."{col}"' for col in self.on_duplicate_key_update]
             )
             self._statement_template = f"{insert_statement} ON CONFLICT ({key_cols}) DO UPDATE SET {update_cols}"
         elif self.on_duplicate_key_update == False:
@@ -211,7 +211,15 @@ class PgLoader:
             await create_tables(conn=conn, create_from=self.table)
         return self
 
+    async def close(self):
+        await self.pool.close()
+
     async def load_row(self, row: Dict[str, Any] = None, **kwargs):
+        """Load row to the database.
+
+        Args:
+            row (Dict[str, Any]): Row to that should be loaded.
+        """
         if row:
             row.update(kwargs)
         else:
