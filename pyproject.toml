@@ -1,6 +1,6 @@
 [project]
 name = "dbflows"
-version = "0.2.1"
+version = "0.2.2"
 description = "Database incremental exports, transfers, imports, ETL, creation / management"
 authors = [{ name = "Dan Kelleher", email = "kelleherjdan@gmail.com" }]
 license = { text = "MIT" }
@@ -23,7 +23,6 @@ dependencies = [
     "tqdm",
     "pydantic>=2.0.0",
     "cytoolz",
-    "connectorx",
     "pandas>=2.0.0",
     "asyncpg",
     "ujson",
