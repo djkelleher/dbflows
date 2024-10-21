@@ -290,6 +290,10 @@ class PgLoader:
         async with self.pool.acquire() as conn:
             return await conn.fetchval(compile_statement(query))
 
+    async def execute(self, query: Any) -> List[Any]:
+        async with self.pool.acquire() as conn:
+            return await conn.execute(compile_statement(query))
+
     async def _load(self, rows: List[List[Any]]):
         # rows should all contain same columns.
         columns = list(rows[0].keys())
