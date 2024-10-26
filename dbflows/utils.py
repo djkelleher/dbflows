@@ -188,12 +188,12 @@ def schema_table(table: sa.Table | str) -> str:
     if isinstance(table, str):
         if "." in table:
             return table
-        return f"public.{table}"
+        return f'public."{table}"'
     if not isinstance(table, sa.Table):
         if not hasattr(table, "__table__"):
             raise ValueError(f"Invalid table type ({type(table)}): {table}")
         table = table.__table__
-    return f"{table.schema or 'public'}.{table.name}"
+    return f'{table.schema or 'public'}."{table.name}"'
 
 
 def schema_tables(schema: str, engine: Union[str, Engine]) -> List[sa.Table]:
