@@ -7,9 +7,9 @@ from .utils import compile_statement, get_connection_pool, logger
 
 class PgPoolConn:
     @classmethod
-    async def create(cls, pg_url: str):
+    async def create(cls, pg_url: str, max_conn: int = 10):
         self = cls()
-        self.pool = await get_connection_pool(pg_url)
+        self.pool = await get_connection_pool(pg_url, max_conn=max_conn)
         return self
 
     async def execute(self, query: Any) -> List[Any]:

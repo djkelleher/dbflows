@@ -9,8 +9,8 @@ from quicklogs import get_logger
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 
+from .conn import PgPoolConn
 from .tables import create_tables
-from .utils import compile_statement, get_connection_pool
 from .utils import schema_table as get_schema_table
 from .utils import to_table
 
@@ -83,7 +83,9 @@ class PgLoader:
         self = cls()
         self.table = to_table(table)
         self.schema_table = get_schema_table(self.table)
-        self.pool = await get_connection_pool(pg_url, max_conn=max_conn)
+        self.pg_conn = await PgPoolConn.create(pg_url, max_conn=max_conn)
+        self.pool = self.pg_conn.pool
+
         self.row_batch_size = row_batch_size
         self.on_duplicate_key_update = on_duplicate_key_update
         self.group_by_columns_present = group_by_columns_present
@@ -212,7 +214,7 @@ class PgLoader:
         return self
 
     async def close(self):
-        await self.pool.close()
+        await self.pg_conn.close()
 
     async def load_row(self, row: Dict[str, Any] = None, **kwargs):
         """Load row to the database.
@@ -277,22 +279,6 @@ class PgLoader:
                 )
                 break
         return rows
-
-    async def fetch(self, query: sa.Select) -> List[Any]:
-        async with self.pool.acquire() as conn:
-            return await conn.fetch(compile_statement(query))
-
-    async def fetchrow(self, query: sa.Select) -> List[Any]:
-        async with self.pool.acquire() as conn:
-            return await conn.fetchrow(compile_statement(query))
-
-    async def fetchval(self, query: sa.Select) -> List[Any]:
-        async with self.pool.acquire() as conn:
-            return await conn.fetchval(compile_statement(query))
-
-    async def execute(self, query: Any) -> List[Any]:
-        async with self.pool.acquire() as conn:
-            return await conn.execute(compile_statement(query))
 
     async def _load(self, rows: List[List[Any]]):
         # rows should all contain same columns.
