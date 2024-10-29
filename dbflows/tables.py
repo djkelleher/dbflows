@@ -4,6 +4,7 @@ from pprint import pformat
 from types import ModuleType
 from typing import List, Optional, Sequence, Union
 
+import asyncpg
 import sqlalchemy as sa
 from dynamic_imports import class_inst
 from sqlalchemy import func as fn
@@ -120,7 +121,11 @@ async def create_tables(
                 await create_tables(conn, fk_tbl, recreate)
         if schema := table.schema:
             # create schema if needed.
-            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+            try:
+                await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+            except asyncpg.exceptions.UniqueViolationError:
+                # possible error from coroutine execution.
+                pass
         else:
             schema = "public"
         table_name = table.name
