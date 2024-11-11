@@ -193,7 +193,8 @@ def schema_table(table: sa.Table | str) -> str:
         if not hasattr(table, "__table__"):
             raise ValueError(f"Invalid table type ({type(table)}): {table}")
         table = table.__table__
-    return f'{table.schema or 'public'}."{table.name}"'
+    schema = table.schema or 'public'
+    return f'{schema}."{table.name}"'
 
 
 def schema_tables(schema: str, engine: Union[str, Engine]) -> List[sa.Table]:
