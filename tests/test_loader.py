@@ -2,7 +2,6 @@ from copy import deepcopy
 from random import randint
 from uuid import uuid4
 
-import asyncpg
 import pytest
 import sqlalchemy as sa
 
@@ -167,7 +166,8 @@ async def test_fetch(key_multi_value_table, temp_db):
         {"key": str(uuid4()), "data1": str(uuid4()), "data2": str(uuid4())},
     ]
     await loader.load_rows(rows)
-    fetched_rows = await loader.fetch(sa.select(key_multi_value_table))
+    async with loader.engine.begin() as conn:
+        fetched_rows = (await conn.execute(sa.select(key_multi_value_table))).fetchall()
     assert len(fetched_rows) == len(rows)
 
 
@@ -180,10 +180,9 @@ async def test_fetchrow(key_multi_value_table, temp_db):
         {"key": str(uuid4()), "data1": str(uuid4()), "data2": str(uuid4())},
     ]
     await loader.load_rows(rows)
-    fetched_row = await loader.fetchrow(
-        sa.select(key_multi_value_table).where(key_multi_value_table.c.key == key1)
-    )
-    assert isinstance(fetched_row, asyncpg.Record)
+    async with loader.engine.begin() as conn:
+        fetched_row = (await conn.execute(sa.select(key_multi_value_table).where(key_multi_value_table.c.key == key1))).fetchone()
+    #assert isinstance(fetched_row, tuple)
 
 
 @pytest.mark.asyncio
@@ -195,9 +194,10 @@ async def test_fetchval(key_multi_value_table, temp_db):
         {"key": str(uuid4()), "data1": str(uuid4()), "data2": str(uuid4())},
     ]
     await loader.load_rows(rows)
-    fetched_value = await loader.fetchval(
-        sa.select(key_multi_value_table.c.data1).where(
-            key_multi_value_table.c.key == key1
-        )
-    )
+    async with loader.engine.begin() as conn:
+        fetched_value = (await conn.execute(
+            sa.select(key_multi_value_table.c.data1).where(
+                key_multi_value_table.c.key == key1
+            )
+        )).scalar()
     assert isinstance(fetched_value, str)

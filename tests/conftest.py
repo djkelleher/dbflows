@@ -6,6 +6,7 @@ from pathlib import Path
 from random import choice, randint, uniform
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from typing import Callable, List, Literal, Optional
+from sqlalchemy.ext.asyncio import create_async_engine
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -18,7 +19,6 @@ from fileflows import Files, S3Cfg
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.ext.asyncio.engine import AsyncEngine
 
-from dbflows.export.hive import ExportMeta
 from dbflows.utils import driver_pg_url, schema_table
 
 
@@ -61,14 +61,15 @@ async def temp_db(request) -> str:
     pg_url = request.config.getoption("--pg-url")
     base_url, db_name = os.path.split(pg_url)
     test_db_name = f"test_{db_name}"
-    conn = await asyncpg.connect(dsn=f"{base_url}/postgres")
-    await conn.execute(f"DROP DATABASE IF EXISTS {test_db_name} WITH (FORCE)")
-    await conn.execute(f"CREATE DATABASE {test_db_name}")
-    # provide URL to the created database.
-    yield f"{base_url}/{test_db_name}"
-    # drop the database.
-    await conn.execute(f"DROP DATABASE {test_db_name} WITH (FORCE)")
-    await conn.close()
+    engine = create_async_engine(f"{base_url}/postgres",  isolation_level="AUTOCOMMIT")
+    async with engine.begin() as conn:
+        await conn.execute(sa.text(f"DROP DATABASE IF EXISTS {test_db_name} WITH (FORCE)"))
+        await conn.execute(sa.text(f"CREATE DATABASE {test_db_name}"))
+        # provide URL to the created database.
+        yield f"{base_url}/{test_db_name}"
+        # drop the database.
+        await conn.execute(sa.text(f"DROP DATABASE {test_db_name} WITH (FORCE)"))
+    await engine.dispose()
 
 
 @pytest.fixture
