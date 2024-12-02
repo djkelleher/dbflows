@@ -12,7 +12,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 from sqlalchemy.schema import CreateTable
 
-from .utils import compile_statement, logger, schema_table, to_table
+from .utils import logger, schema_table, to_table
 
 tables_table = sa.Table(
     "tables",
@@ -63,21 +63,19 @@ def list_tables_statement(
         query = query.where(tables_table.c.table_schema == schema)
     if like_pattern:
         query = query.where(tables_table.c.table_name.like(like_pattern))
-    return compile_statement(query)
+    return query
 
 
-def table_exists_query(table: sa.Table) -> str:
+def table_exists_query(table: sa.Table):
     """Check if a table exists in the database. Returns scalar."""
-    return compile_statement(
-        sa.select(
+    return sa.select(
             sa.exists(sa.text("1"))
             .select_from(tables_table)
             .where(
                 tables_table.c.table_schema == table.schema,
                 tables_table.c.table_name == table.name,
             )
-        ),
-    )
+        )
 
 
 async def create_tables(
@@ -110,7 +108,7 @@ async def create_tables(
     created_tables = []
     for table in tables:
         table = to_table(table)
-        exists = await conn.fetchval(table_exists_query(table))
+        exists = await conn.scalar(table_exists_query(table))
         if exists:
             continue
         # create referenced tables first.
@@ -148,7 +146,7 @@ async def create_tables(
         statement = CreateTable(table, if_not_exists=True).compile(
             dialect=postgresql.dialect()
         )
-        await conn.execute(str(statement))
+        await conn.execute(sa.text(str(statement)))
         # create hypertable if needed.
         await create_hypertable(conn, table)
         created_tables.append(table)

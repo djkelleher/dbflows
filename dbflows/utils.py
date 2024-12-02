@@ -9,9 +9,13 @@ from async_lru import alru_cache
 from pydantic import PostgresDsn, validate_call
 from quicklogs import get_logger
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.engine import Compiled, Engine
 from sqlalchemy.ext.asyncio.engine import AsyncEngine
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm.decl_api import DeclarativeMeta
+from sqlalchemy.sql import bindparam
+from sqlalchemy.sql.sqltypes import JSON
 
 logger = get_logger("dbflows")
 
@@ -193,7 +197,7 @@ def schema_table(table: sa.Table | str) -> str:
         if not hasattr(table, "__table__"):
             raise ValueError(f"Invalid table type ({type(table)}): {table}")
         table = table.__table__
-    schema = table.schema or 'public'
+    schema = table.schema or "public"
     return f'{schema}."{table.name}"'
 
 
@@ -226,7 +230,7 @@ def parse_pg_url(url: PostgresDsn) -> PostgresDsn:
 
 
 def driver_pg_url(driver: str, url: str) -> str:
-    return url.replace("postgresql://", f"postgresql+{driver}://")
+    return remove_engine_driver(url).replace("postgresql://", f"postgresql+{driver}://")
 
 
 def range_slices(
