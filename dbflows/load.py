@@ -6,13 +6,15 @@ import sqlalchemy as sa
 import ujson as json
 from cytoolz.itertoolz import groupby, partition_all
 from quicklogs import get_logger
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.dialects.postgresql.dml import Insert
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 
-from .conn import PgPoolConn
 from .tables import create_tables
 from .utils import schema_table as get_schema_table
 from .utils import to_table
+from dbflows.conn import PgConn
 
 
 async def load_rows(
@@ -55,7 +57,7 @@ class PgLoader:
         column_values_converter: Optional[Callable[[Any], Any]] = None,
         column_value_converters: Optional[Dict[str, Callable[[Any], Any]]] = None,
         group_by_columns_present: bool = True,
-        max_conn: int = 10,
+        #max_conn: int = 10,
         logger: Optional[Logger] = None,
     ) -> None:
         """Load data rows to a postgresql database.
@@ -83,9 +85,11 @@ class PgLoader:
         self = cls()
         self.table = to_table(table)
         self.schema_table = get_schema_table(self.table)
-        self.pg_conn = await PgPoolConn.create(pg_url, max_conn=max_conn)
-        self.pool = self.pg_conn.pool
-
+        # self.pg_conn = await PgPoolConn.create(pg_url, max_conn=max_conn)
+        # self.pool = self.pg_conn.pool
+        # TODO cached engine.
+        self.pg_conn = PgConn(pg_url)
+        self.engine = self.pg_conn.engine
         self.row_batch_size = row_batch_size
         self.on_duplicate_key_update = on_duplicate_key_update
         self.group_by_columns_present = group_by_columns_present
@@ -190,6 +194,17 @@ class PgLoader:
                 if not col.primary_key
             ]
 
+        if self.on_duplicate_key_update:
+            self._build_statement = self._upsert_update_statement
+        elif self.on_duplicate_key_update == False:
+            self._build_statement = self._upsert_ignore_statement
+        elif not self.on_duplicate_key_update:
+            self._build_statement = self._insert_statement
+        else:
+            raise ValueError(
+                f"Invalid argument for on_duplicate_key_update: {self.on_duplicate_key_update}"
+            )
+        """
         key_cols = ",".join([f'"{c}"' for c in self.key_columns])
         insert_statement = f"INSERT INTO {self.schema_table} ({{}}) VALUES {{}}"
         if self.on_duplicate_key_update:
@@ -208,13 +223,14 @@ class PgLoader:
             raise ValueError(
                 f"Invalid argument for on_duplicate_key_update: {self.on_duplicate_key_update}"
             )
+        """
         # create table if it doesn't already exist.
-        async with self.pool.acquire() as conn:
+        async with self.engine.begin() as conn:
             await create_tables(conn=conn, create_from=self.table)
         return self
 
     async def close(self):
-        await self.pg_conn.close()
+        await self.engine.dispose()
 
     async def load_row(self, row: Dict[str, Any] = None, **kwargs):
         """Load row to the database.
@@ -281,6 +297,12 @@ class PgLoader:
         return rows
 
     async def _load(self, rows: List[List[Any]]):
+        async with self.engine.begin() as conn:
+            self.logger.info("Loading %i rows to %s", len(rows), self.table.name)
+            await conn.execute(self._build_statement(rows))
+
+    """
+    async def _load(self, rows: List[List[Any]]):
         # rows should all contain same columns.
         columns = list(rows[0].keys())
         n_cols = len(columns)
@@ -300,6 +322,7 @@ class PgLoader:
         )
         async with self.pool.acquire() as conn:
             await conn.execute(statement, *values)
+    """
 
     def _apply_duplicate_key_rows_keep(
         self,
@@ -329,6 +352,54 @@ class PgLoader:
                 row_count,
             )
         return unique_key_rows
+
+    def _insert_statement(self, rows: List[Dict[str, Any]]) -> Insert:
+        """Construct a statement to insert `rows`.
+
+        Args:
+            rows (List[Dict[str,Any]]): The rows that will be loaded.
+
+        Returns:
+            Insert: An insert statement.
+        """
+        return postgresql.insert(self.table).values(rows)
+
+    def _upsert_update_statement(self, rows: List[Dict[str, Any]]) -> Insert:
+        """Construct a statement to load `rows`.
+
+        Args:
+            rows (List[Dict[str,Any]]): The rows that will be loaded.
+
+        Returns:
+            Insert: An upsert statement.
+        """
+
+        # check column of first row (all rows should have same columns)
+        on_duplicate_key_update = [
+            c for c in self.on_duplicate_key_update if c in rows[0]
+        ]
+        if len(on_duplicate_key_update):
+            statement = postgresql.insert(self.table).values(rows)
+            return statement.on_conflict_do_update(
+                index_elements=self.key_columns,
+                set_={k: statement.excluded[k] for k in on_duplicate_key_update},
+            )
+        return self._upsert_ignore_statement(rows)
+
+    def _upsert_ignore_statement(self, rows: List[Dict[str, Any]]) -> Insert:
+        """Construct a statement to load `rows`.
+
+        Args:
+            rows (List[Dict[str,Any]]): The rows that will be loaded.
+
+        Returns:
+            Insert: An upsert statement.
+        """
+        return (
+            postgresql.insert(self.table)
+            .values(rows)
+            .on_conflict_do_nothing(index_elements=self.key_columns)
+        )
 
 
 def create_column_name_converter(
