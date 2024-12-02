@@ -1,6 +1,7 @@
 from typing import Any, List
 
 import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from .utils import compile_statement, get_connection_pool, logger
 
@@ -31,3 +32,32 @@ class PgPoolConn:
     async def close(self):
         logger.info("Closing asyncpg connection pool.")
         await self.pool.close()
+
+
+class PgConn:
+    def __init__(self, pg_url: str):
+        self.engine = create_async_engine(pg_url)
+
+    async def execute(self, query: Any) -> List[Any]:
+        async with self.engine.begin() as conn:
+            return await conn.execute(query)
+
+    async def fetch(self, query: sa.Select) -> List[Any]:
+        async with self.engine.begin() as conn:
+            return (await conn.execute(query)).fetchall()
+
+    async def fetchrow(self, query: sa.Select) -> List[Any]:
+        async with self.engine.begin() as conn:
+            return (await conn.execute(query)).fetchone()
+
+    async def fetchval(self, query: sa.Select) -> List[Any]:
+        async with self.engine.begin() as conn:
+            fetched_value = (await conn.execute(query)).scalar()
+        return fetched_value
+
+    async def close(self):
+        logger.info("Closing asyncpg connection pool.")
+        await self.engine.dispose()
+
+    
+
