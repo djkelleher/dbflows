@@ -67,5 +67,5 @@ class PgConn:
         return fetched_value
 
     async def close(self):
-        logger.info("Closing asyncpg connection pool.")
+        logger.info("Closing SQLAlchemy engine.")
         await self.engine.dispose()

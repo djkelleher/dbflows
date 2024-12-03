@@ -120,7 +120,7 @@ async def create_tables(
         if schema := table.schema:
             # create schema if needed.
             try:
-                await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+                await conn.execute(sa.text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
             except asyncpg.exceptions.UniqueViolationError:
                 # possible error from coroutine execution.
                 pass
@@ -128,7 +128,7 @@ async def create_tables(
             schema = "public"
         table_name = table.name
         if recreate:
-            await conn.execute(f'DROP TABLE IF EXISTS {schema}."{table_name}" CASCADE')
+            await conn.execute(sa.text(f'DROP TABLE IF EXISTS {schema}."{table_name}" CASCADE'))
         # create enum types if they do not already exist in the database.
         # this is necessary because sa.Table.create has no way to handle columns that have an enum type that already exists in the Database.
         enums = [
@@ -199,4 +199,4 @@ async def create_hypertable(conn, table: Union[sa.Table, DeclarativeMeta]) -> No
             "Creating hypertable partition: %s.",
             statement,
         )
-        await conn.execute(statement)
+        await conn.execute(sa.text(statement))
