@@ -3,18 +3,17 @@ from logging import Logger
 from typing import Any, Callable, Dict, List, Literal, Optional, Union
 
 import sqlalchemy as sa
-import ujson as json
 from cytoolz.itertoolz import groupby, partition_all
 from quicklogs import get_logger
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.dialects.postgresql.dml import Insert
 from sqlalchemy.orm.decl_api import DeclarativeMeta
+
+from dbflows.conn import PgConn
 
 from .tables import create_tables
 from .utils import schema_table as get_schema_table
 from .utils import to_table
-from dbflows.conn import PgConn
 
 
 async def load_rows(
@@ -57,7 +56,7 @@ class PgLoader:
         column_values_converter: Optional[Callable[[Any], Any]] = None,
         column_value_converters: Optional[Dict[str, Callable[[Any], Any]]] = None,
         group_by_columns_present: bool = True,
-        #max_conn: int = 10,
+        # max_conn: int = 10,
         logger: Optional[Logger] = None,
     ) -> None:
         """Load data rows to a postgresql database.
@@ -159,19 +158,6 @@ class PgLoader:
                 return rows
 
             self._filters.append(apply_value_converter)
-
-        # check for JSON columns.
-        json_cols = [
-            c.name for c in self.table.columns.values() if isinstance(c.type, JSON)
-        ]
-        if json_cols:
-            if column_value_converters is None:
-                column_value_converters = {}
-            for col in json_cols:
-                if col not in column_value_converters:
-                    column_value_converters[col] = lambda v: (
-                        json.dumps(v) if v else None
-                    )
 
         if column_value_converters:
 
