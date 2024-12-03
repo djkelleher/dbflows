@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any, Dict, List
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -46,9 +46,20 @@ class PgConn:
         async with self.engine.begin() as conn:
             return (await conn.execute(query)).fetchall()
 
+    async def fetch_dicts(self, query: sa.Select) -> List[Dict[str, Any]]:
+        async with self.engine.begin() as conn:
+            rows = (await conn.execute(query)).fetchall()
+        return [dict(row._mapping) for row in rows]
+
     async def fetchrow(self, query: sa.Select) -> List[Any]:
         async with self.engine.begin() as conn:
             return (await conn.execute(query)).fetchone()
+
+    async def fetchrow_dict(self, query: sa.Select) -> Dict[str, Any]:
+        async with self.engine.begin() as conn:
+            row = (await conn.execute(query)).fetchone()
+        if row:
+            return dict(row._mapping)
 
     async def fetchval(self, query: sa.Select) -> List[Any]:
         async with self.engine.begin() as conn:
@@ -58,6 +69,3 @@ class PgConn:
     async def close(self):
         logger.info("Closing asyncpg connection pool.")
         await self.engine.dispose()
-
-    
-
