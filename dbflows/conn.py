@@ -1,3 +1,4 @@
+from functools import cache
 from typing import Any, Dict, List
 
 import sqlalchemy as sa
@@ -33,10 +34,13 @@ class PgPoolConn:
         logger.info("Closing asyncpg connection pool.")
         await self.pool.close()
 
+@cache
+def cached_sa_conn(pg_url: str):
+    return create_async_engine(pg_url)
 
 class PgConn:
-    def __init__(self, pg_url: str):
-        self.engine = create_async_engine(pg_url)
+    def __init__(self, pg_url: str, use_cached_engine: bool = True):
+        self.engine = cached_sa_conn(pg_url) if use_cached_engine else create_async_engine(pg_url)
 
     async def execute(self, query: Any) -> List[Any]:
         async with self.engine.begin() as conn:
