@@ -61,9 +61,14 @@ class PgConn:
         if row:
             return dict(row._mapping)
 
-    async def fetchval(self, query: sa.Select) -> List[Any]:
+    async def fetchval(self, query: sa.Select) -> Any:
         async with self.engine.begin() as conn:
             fetched_value = (await conn.execute(query)).scalar()
+        return fetched_value
+    
+    async def fetchvals(self, query: sa.Select) -> List[Any]:
+        async with self.engine.begin() as conn:
+            fetched_value = list((await conn.execute(query)).scalars())
         return fetched_value
 
     async def close(self):
