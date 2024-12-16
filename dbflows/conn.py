@@ -46,7 +46,7 @@ class PgConn:
         async with self.engine.begin() as conn:
             return await conn.execute(query)
 
-    async def fetch(self, query: sa.Select) -> List[Any]:
+    async def fetchrows(self, query: sa.Select) -> List[Any]:
         async with self.engine.begin() as conn:
             return (await conn.execute(query)).fetchall()
 
