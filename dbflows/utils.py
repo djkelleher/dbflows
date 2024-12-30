@@ -3,19 +3,14 @@ from datetime import date, datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 from zoneinfo import ZoneInfo
 
-import asyncpg
 import sqlalchemy as sa
-from async_lru import alru_cache
 from pydantic import PostgresDsn, validate_call
 from quicklogs import get_logger
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.engine import Compiled, Engine
 from sqlalchemy.ext.asyncio.engine import AsyncEngine
-from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm.decl_api import DeclarativeMeta
-from sqlalchemy.sql import bindparam
-from sqlalchemy.sql.sqltypes import JSON
 
 logger = get_logger("dbflows")
 
@@ -25,12 +20,6 @@ TimeT = Union[int, float, datetime, date]
 _ws_re = re.compile(r"\s+")
 _camel_re = re.compile(r"([a-z0-9])([A-Z])")
 _digit_start_re = re.compile(r"^\d")
-
-
-@alru_cache(maxsize=None)
-async def get_connection_pool(pg_url: str, max_conn: int = 10):
-    """Get a (possibly shared) connection pool for the given PostgreSQL database."""
-    return await asyncpg.create_pool(dsn=pg_url, max_size=max_conn)
 
 
 def size_in_bytes(mem_size: str) -> int:
