@@ -12,6 +12,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 from sqlalchemy.schema import CreateTable
 
+from .conn import PgConn
 from .utils import logger, schema_table, to_table
 
 tables_table = sa.Table(
@@ -43,19 +44,26 @@ def format_table_name(name: str) -> str:
 # https://docs.timescale.com/api/latest/compression/
 
 
-def drop_table_statement(schema_table: str, cascade: bool = False) -> str:
+async def drop_table(conn: PgConn, schema_table: str, cascade: bool = True):
+    logger.info("Dropping table %s. Cascade: %s", schema_table, cascade)
     statement = f"DROP TABLE {schema_table}"
     if cascade:
         statement += " CASCADE"
-    return statement
+    return await conn.execute(sa.text(statement))
 
-
-def list_tables_statement(
-    schema: Optional[str] = None, like_pattern: Optional[str] = None
-) -> str:
+async def drop_tables(
+    conn: PgConn, schema: Optional[str] = None, like_pattern: Optional[str] = None
+) -> List[str]:
+    tables = await list_tables(conn, schema, like_pattern)
+    for table in tables:
+        await drop_table(conn, table)
+    
+async def list_tables(
+    conn: PgConn, schema: Optional[str] = None, like_pattern: Optional[str] = None
+) -> List[str]:
     """Query all tables in the database. Returns scalars."""
     query = sa.select(
-        fn.concat(tables_table.c.table_schema, ".", tables_table.c.table_name).label(
+        fn.concat(tables_table.c.table_schema, ".",'"', tables_table.c.table_name,'"').label(
             "table"
         )
     )
@@ -63,19 +71,24 @@ def list_tables_statement(
         query = query.where(tables_table.c.table_schema == schema)
     if like_pattern:
         query = query.where(tables_table.c.table_name.like(like_pattern))
-    return query
+    return await conn.fetchvals(query)
+
 
 
 def table_exists_query(table: sa.Table):
-    """Check if a table exists in the database. Returns scalar."""
     return sa.select(
-            sa.exists(sa.text("1"))
-            .select_from(tables_table)
-            .where(
-                tables_table.c.table_schema == table.schema,
-                tables_table.c.table_name == table.name,
-            )
+        sa.exists(sa.text("1"))
+        .select_from(tables_table)
+        .where(
+            tables_table.c.table_schema == table.schema,
+            tables_table.c.table_name == table.name,
         )
+    )
+
+
+async def table_exists(conn: PgConn, table: sa.Table) -> bool:
+    """Check if a table exists in the database. Returns scalar."""
+    return await conn.fetchval(table_exists_query(table))
 
 
 async def create_tables(
@@ -108,7 +121,8 @@ async def create_tables(
     created_tables = []
     for table in tables:
         table = to_table(table)
-        exists = await conn.scalar(table_exists_query(table))
+        exists = await conn.execute(table_exists_query(table))
+        exists = exists.scalar()
         if exists:
             continue
         # create referenced tables first.
@@ -120,7 +134,7 @@ async def create_tables(
         if schema := table.schema:
             # create schema if needed.
             try:
-                await conn.execute(sa.text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
+                await conn.execute(sa.text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
             except asyncpg.exceptions.UniqueViolationError:
                 # possible error from coroutine execution.
                 pass
@@ -128,7 +142,7 @@ async def create_tables(
             schema = "public"
         table_name = table.name
         if recreate:
-            await conn.execute(sa.text(f'DROP TABLE IF EXISTS {schema}."{table_name}" CASCADE'))
+            await conn.execute(sa.text(f'DROP TABLE IF EXISTS "{schema}"."{table_name}" CASCADE'))
         # create enum types if they do not already exist in the database.
         # this is necessary because sa.Table.create has no way to handle columns that have an enum type that already exists in the Database.
         enums = [
