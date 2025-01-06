@@ -10,8 +10,24 @@ from fileflows.s3 import S3, S3Cfg
 from sqlalchemy.orm.decl_api import DeclarativeMeta
 from tqdm import tqdm
 
+from dbflows import cached_sa_conn
+
 from .tables import create_tables
-from .utils import get_connection_pool, logger, schema_table
+from .utils import logger, schema_table
+
+
+async def create_tables_from_sources(table_sources: Sequence[Union[sa.Table, DeclarativeMeta, ModuleType]], pg_url: str, recreate_tables: bool = False):
+    if not isinstance(table_sources, (list, tuple)):
+        table_sources = [table_sources]
+    # find table definition objects.
+    created_tables = []
+    pg = cached_sa_conn(pg_url)
+    async with pg.begin() as conn:
+        for src in table_sources:
+            created_tables += await create_tables(
+                conn=conn, create_from=src, recreate=recreate_tables
+            )
+    return created_tables
 
 
 async def initialize_db(
@@ -23,16 +39,8 @@ async def initialize_db(
     load_files_to_existing_tables: bool = False,
     s3_cfg: Optional[S3Cfg] = None,
 ):
-    if not isinstance(table_sources, (list, tuple)):
-        table_sources = [table_sources]
-    # find table definition objects.
-    created_tables = []
-    pg = await get_connection_pool(pg_url)
-    async with pg.acquire() as conn:
-        for src in table_sources:
-            created_tables += await create_tables(
-                conn=conn, create_from=src, recreate=recreate_tables
-            )
+    """Create database tables and load data from files."""
+    created_tables = await create_tables_from_sources(table_sources=table_sources, recreate_tables=recreate_tables)
     if files_bucket is None:
         return
     # find files with data for tables.
@@ -40,11 +48,10 @@ async def initialize_db(
     files = s3.list_files(
         bucket_name=files_bucket,
         partition=files_partition,
-        return_as="urls",
-        pattern=None,
+        return_as="urls"
     )
     logger.info(
-        "Found %i files in %s %s.", len(files), files_bucket, files_partition or ""
+        "Found %i files in %s %s", len(files), files_bucket, files_partition or ""
     )
     # map schame.table to file URL.
     table_file_urls = defaultdict(list)
@@ -59,7 +66,7 @@ async def initialize_db(
     if not table_file_urls:
         logger.info("No files to load to database.")
         return
-    pg_db_name = "trading"
+    pg_db_name = pg_url.split("/")[-1]
     duckdb.execute(f"ATTACH '{pg_url}' AS {pg_db_name} (TYPE POSTGRES)")
     for table_name, table_files in table_file_urls.items():
         logger.info(

@@ -273,6 +273,8 @@ class PgLoader:
         Returns:
             List[Dict[str, Any]]: The filtered rows.
         """
+        if not rows:
+            return []
         for filter_func in self._filters:
             if not (rows := filter_func(rows)):
                 self.logger.info(
