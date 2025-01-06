@@ -36,7 +36,13 @@ class PgPoolConn:
 
 @cache
 def cached_sa_conn(pg_url: str):
-    return create_async_engine(pg_url)
+    return create_async_engine(
+        pg_url,
+        pool_size=20,       # Allow up to 20 persistent connections
+        max_overflow=0,    # Allow up to 10 additional connections temporarily
+        pool_timeout=150,    # Wait up to 150 seconds for a connection
+        echo=True           # Enable SQLAlchemy logging
+    )
 
 class PgConn:
     def __init__(self, pg_url: str, use_cached_engine: bool = True):
