@@ -13,7 +13,7 @@ def cached_sa_conn(pg_url: str):
         pool_size=20,       # Allow up to 20 persistent connections
         max_overflow=0,    # Allow up to 10 additional connections temporarily
         pool_timeout=150,    # Wait up to 150 seconds for a connection
-        echo=True           # Enable SQLAlchemy logging
+        echo=False           # Enable SQLAlchemy logging
     )
 
 class PgConn:
