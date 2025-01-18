@@ -64,7 +64,7 @@ class PgLoader:
 
         Args:
             table (Union[sa.Table, DeclarativeMeta]): The SQLAlchemy table or entity corresponding to the database table that rows will be loaded to.
-            dsn (str): The PostgreSQL dsn connection string to the database.
+            pg_url (str): The PostgreSQL dsn connection string to the database.
             on_duplicate_key_update (Union[bool, List[str]], optional): List of columns that should be updated when key columns exists, or True for all columns, False for no columns, None if duplicates should not be checked (i.e. a normal INSERT). Defaults to None.
             key_columns (Optional[List[str]], optional): List of key columns that should be used for on_duplicate_key_update. Default to primary key.
             row_batch_size (int): Number of rows to load per statement. Defaults to 1500.
@@ -95,8 +95,9 @@ class PgLoader:
         self.key_columns = key_columns or {
             c.name for c in self.table.primary_key.columns
         }
-        self.logger = logger or get_logger(f"{self.table.name}-loader")
         self.duplicate_key_rows_keep = duplicate_key_rows_keep
+        self.logger = logger or get_logger(f"{self.table.name}-loader")
+        self.row_buffer = []
         if not self.key_columns:
             # not applicable.
             remove_rows_missing_key = False
@@ -217,6 +218,13 @@ class PgLoader:
 
     async def close(self):
         await self.engine.dispose()
+
+    async def load_row_buffer(self):
+        if not self.row_buffer:
+            return
+        buffer = self.row_buffer.copy()
+        self.row_buffer.clear()
+        await self.load_rows(buffer)
 
     async def load_row(self, row: Dict[str, Any] = None, **kwargs):
         """Load row to the database.
