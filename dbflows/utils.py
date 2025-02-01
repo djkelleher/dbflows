@@ -187,7 +187,7 @@ def schema_table(table: sa.Table | str) -> str:
             raise ValueError(f"Invalid table type ({type(table)}): {table}")
         table = table.__table__
     schema = table.schema or "public"
-    return f'{schema}."{table.name}"'
+    return f'"{schema}"."{table.name}"'
 
 
 def schema_tables(schema: str, engine: Union[str, Engine]) -> List[sa.Table]:
