@@ -42,10 +42,13 @@ def execute_parallel(
         futures = [
             pool.submit(execute_statement_queue, conn, stmt_q) for _ in range(n_threads)
         ]
+    results = []
     for future in as_completed(futures):
         result = future.result()
         logger.info("DuckDB thread result: %s", result)
+        results.append(results)
     logger.info("Finished executing %i statements", n_stmt)
+    return results
 
 
 def execute_statement_queue(conn: DuckDBPyConnection, statement_q: Queue):
