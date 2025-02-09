@@ -71,7 +71,7 @@ async def list_tables(
         query = query.where(tables_table.c.table_schema == schema)
     if like_pattern:
         query = query.where(tables_table.c.table_name.like(like_pattern))
-    return await conn.fetchvals(query)
+    return await conn.scalars(query)
 
 
 

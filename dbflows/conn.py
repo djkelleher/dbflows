@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from .utils import logger
 
+
 @cache
 def cached_sa_conn(pg_url: str):
     return create_async_engine(
@@ -24,7 +25,7 @@ class PgConn:
         async with self.engine.begin() as conn:
             return await conn.execute(query)
 
-    async def fetchrows(self, query: sa.Select) -> List[Any]:
+    async def fetch_rows(self, query: sa.Select) -> List[Any]:
         async with self.engine.begin() as conn:
             return (await conn.execute(query)).fetchall()
 
@@ -33,22 +34,22 @@ class PgConn:
             rows = (await conn.execute(query)).fetchall()
         return [dict(row._mapping) for row in rows]
 
-    async def fetchrow(self, query: sa.Select) -> List[Any]:
+    async def fetch_row(self, query: sa.Select) -> List[Any]:
         async with self.engine.begin() as conn:
             return (await conn.execute(query)).fetchone()
 
-    async def fetchrow_dict(self, query: sa.Select) -> Dict[str, Any]:
+    async def fetch_dict(self, query: sa.Select) -> Dict[str, Any]:
         async with self.engine.begin() as conn:
             row = (await conn.execute(query)).fetchone()
         if row:
             return dict(row._mapping)
 
-    async def fetchval(self, query: sa.Select) -> Any:
+    async def scalar(self, query: sa.Select) -> Any:
         async with self.engine.begin() as conn:
             fetched_value = (await conn.execute(query)).scalar()
         return fetched_value
     
-    async def fetchvals(self, query: sa.Select) -> List[Any]:
+    async def scalars(self, query: sa.Select) -> List[Any]:
         async with self.engine.begin() as conn:
             fetched_value = list((await conn.execute(query)).scalars())
         return fetched_value
