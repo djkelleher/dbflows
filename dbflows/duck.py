@@ -1,7 +1,7 @@
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from multiprocessing import Queue
+from queue import Queue
 from threading import current_thread
 from typing import List, Optional, Sequence
 
@@ -29,13 +29,11 @@ def execute_parallel(
     conn: DuckDBPyConnection,
     n_threads: Optional[int] = None,
 ):
-    if isinstance(statements, (list, tuple, set)):
-        stmt_q = Queue()
-        for stmt in statements:
-            stmt_q.put(stmt)
-    else:
-        stmt_q = statements
-
+    if not isinstance(statements, (list, tuple, set)):
+        statements = [statements]
+    stmt_q = Queue()
+    for stmt in statements:
+        stmt_q.put(stmt)
     n_stmt = stmt_q.qsize()
     n_threads = n_threads or min(n_stmt, int(os.cpu_count() * 0.7))
     with ThreadPoolExecutor(max_workers=n_threads) as pool:
@@ -46,7 +44,7 @@ def execute_parallel(
     for future in as_completed(futures):
         result = future.result()
         logger.info("DuckDB thread result: %s", result)
-        results.append(results)
+        results.extend(result)
     logger.info("Finished executing %i statements", n_stmt)
     return results
 
@@ -55,24 +53,24 @@ def execute_statement_queue(conn: DuckDBPyConnection, statement_q: Queue):
     # Create a DuckDB connection specifically for this thread
     local_conn = conn.cursor()
     thread_name = current_thread().name
+    results = []
     while not statement_q.empty():
         try:
-            statement, table_name = statement_q.get(timeout=1)
+            statement = statement_q.get(timeout=1)
         except TimeoutError:
             break
-        logger.info("Thread %s processing table %s", thread_name, table_name)
         try:
-            local_conn.execute(statement)
-            logger.info("Thread %s processing table %s", thread_name, table_name)
+            results.append(local_conn.execute(statement).df())
         except Exception as err:
             logger.exception(
-                "Thread %s %s error processing table %s: %s",
+                "Thread %s %s error processing statement (%s): %s",
                 thread_name,
                 type(err),
-                table_name,
+                statement,
                 err,
             )
     logger.info("Thread %s finished.", thread_name)
+    return results
 
 
 def mount_pg_db(
