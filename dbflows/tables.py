@@ -63,7 +63,7 @@ async def list_tables(
 ) -> List[str]:
     """Query all tables in the database. Returns scalars."""
     query = sa.select(
-        fn.concat(tables_table.c.table_schema, ".",'"', tables_table.c.table_name,'"').label(
+        fn.concat('"', tables_table.c.table_schema,'"', ".",'"', tables_table.c.table_name,'"').label(
             "table"
         )
     )
