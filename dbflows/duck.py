@@ -6,6 +6,7 @@ from threading import current_thread
 from typing import List, Optional, Sequence
 
 import duckdb
+import pandas as pd
 from duckdb import DuckDBPyConnection
 
 from .utils import logger
@@ -28,9 +29,14 @@ def execute_parallel(
     statements: Sequence[str] | Queue,
     conn: DuckDBPyConnection,
     n_threads: Optional[int] = None,
-):
+) -> List[pd.DataFrame]:
     if not isinstance(statements, (list, tuple, set)):
         statements = [statements]
+    if len(statements) == 1:
+        if conn:
+            return [conn.execute(statements[0]).df()]
+        with duckdb.connect() as conn:
+            return [conn.execute(statements[0]).df()]
     stmt_q = Queue()
     for stmt in statements:
         stmt_q.put(stmt)
