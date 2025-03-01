@@ -130,6 +130,38 @@ def _export_append(
         n_workers=n_workers,
     )
 
+@cli.command("table", help="Export a database table.")
+@click.argument("table", type=str)
+@click.argument("db-url", type=str)
+@click.argument("save_locs", type=str, nargs=-1)
+@click.option("--slice-column", type=str, default=None)
+@click.option("--partition-column", type=str, default=None)
+@click.option("--file-max-size", type=str, default=None)
+@click.option("--file-stem-prefix", type=str, default=None)
+@click.option("--n-workers", type=int, default=None)
+@click.option("--log-dir", type=str, default=None)
+def export_table_cmd(
+    table,
+    db_url,
+    save_locs,
+    slice_column,
+    partition_column,
+    file_max_size,
+    file_stem_prefix,
+    n_workers,
+    log_dir,
+):
+    export_table(
+        table=table,
+        engine=db_url,
+        save_locs=save_locs,
+        slice_column=slice_column,
+        partition_column=partition_column,
+        file_max_size=file_max_size,
+        file_stem_prefix=file_stem_prefix,
+        n_workers=n_workers,
+        logger=get_logger(name="table-export", file_dir=log_dir) if log_dir else None,
+    )
 
 @export.command(
     "query", help="Export the results of a `query` at `db-url` to `save-path`."
