@@ -49,7 +49,6 @@ def execute_parallel(
     results = []
     for future in as_completed(futures):
         result = future.result()
-        logger.info("DuckDB thread result: %s", result)
         results.extend(result)
     logger.info("Finished executing %i statements", n_stmt)
     return results
