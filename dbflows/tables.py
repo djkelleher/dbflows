@@ -44,12 +44,15 @@ def format_table_name(name: str) -> str:
 # https://docs.timescale.com/api/latest/compression/
 
 
-async def drop_table(conn: PgConn, schema_table: str, cascade: bool = True):
-    logger.info("Dropping table %s. Cascade: %s", schema_table, cascade)
-    statement = f"DROP TABLE {schema_table}"
+async def drop_table(conn: PgConn, table: str | sa.Table, cascade: bool = True):
+    if not isinstance(table,str):
+        table = schema_table(table)
+    logger.info("Dropping table %s. Cascade: %s", table, cascade)
+    statement = f"DROP TABLE {table}"
     if cascade:
         statement += " CASCADE"
     return await conn.execute(sa.text(statement))
+
 
 async def drop_tables(
     conn: PgConn, schema: Optional[str] = None, like_pattern: Optional[str] = None
@@ -58,6 +61,7 @@ async def drop_tables(
     for table in tables:
         await drop_table(conn, table)
     
+
 async def list_tables(
     conn: PgConn, schema: Optional[str] = None, like_pattern: Optional[str] = None
 ) -> List[str]:
