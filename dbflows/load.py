@@ -294,7 +294,6 @@ class PgLoader:
 
     async def _load(self, rows: List[List[Any]]):
         async with self.engine.begin() as conn:
-            self.logger.info("Loading %i rows to %s", len(rows), self.table.name)
             await conn.execute(self._build_statement(rows))
 
     """
