@@ -26,15 +26,15 @@ def get_table_names(conn, schema: Optional[str] = None) -> List[str]:
 
 
 def execute_parallel(
-    statements: Sequence[str] | Queue,
+    statements: Sequence[str],
     conn: DuckDBPyConnection,
     n_threads: Optional[int] = None,
 ) -> List[pd.DataFrame]:
-    if not isinstance(statements, (list, tuple, set)):
-        statements = [statements]
-    if len(statements) == 1:
+    if isinstance(statements, (list, tuple, set)) and len(statements) == 1:
+        statements = statements[0]
+    if isinstance(statements, str):
         if conn:
-            return [conn.execute(statements[0]).df()]
+            return [conn.execute(statements).df()]
         with duckdb.connect() as conn:
             return [conn.execute(statements[0]).df()]
     stmt_q = Queue()
@@ -42,6 +42,7 @@ def execute_parallel(
         stmt_q.put(stmt)
     n_stmt = stmt_q.qsize()
     n_threads = n_threads or min(n_stmt, int(os.cpu_count() * 0.7))
+    logger.info("Executing %i statements with %i threads", n_stmt, n_threads)
     with ThreadPoolExecutor(max_workers=n_threads) as pool:
         futures = [
             pool.submit(execute_statement_queue, conn, stmt_q) for _ in range(n_threads)
@@ -50,7 +51,7 @@ def execute_parallel(
     for future in as_completed(futures):
         result = future.result()
         results.extend(result)
-    logger.info("Finished executing %i statements", n_stmt)
+    logger.info("Finished executing %i statements with %i threads", n_stmt, n_threads)
     return results
 
 
@@ -83,9 +84,7 @@ def mount_pg_db(
 ) -> str:
     """Mount a Postgresql database to DuckDB (so it can be queried by DuckDB)."""
     conn = conn or duckdb
-
     pg_db_name = pg_url.split("/")[-1]
-
     # Remove the 'postgresql+...' driver from a SQLAlchemy URL.
     pg_url = re.sub(r"^postgresql\+\w+:", "postgresql:", pg_url)
     try:
