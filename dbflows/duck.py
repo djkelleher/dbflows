@@ -9,7 +9,7 @@ import duckdb
 import pandas as pd
 from duckdb import DuckDBPyConnection
 
-from .utils import logger
+from .utils import logger, remove_engine_driver
 
 
 def create_table(conn: DuckDBPyConnection, schema_table: str, columns: str):
@@ -79,16 +79,13 @@ def execute_statement_queue(conn: DuckDBPyConnection, statement_q: Queue):
     return results
 
 
-def mount_pg_db(
-    pg_url: str, conn: Optional[DuckDBPyConnection] = None
-) -> str:
-    """Mount a Postgresql database to DuckDB (so it can be queried by DuckDB)."""
-    conn = conn or duckdb
+def mount_pg_db(pg_url: str, conn: Optional[DuckDBPyConnection]=None) -> str:
     pg_db_name = pg_url.split("/")[-1]
-    # Remove the 'postgresql+...' driver from a SQLAlchemy URL.
-    pg_url = re.sub(r"^postgresql\+\w+:", "postgresql:", pg_url)
+    conn = conn or duckdb
     try:
-        conn.execute(f"ATTACH '{pg_url}' AS {pg_db_name} (TYPE POSTGRES)")
+        conn.execute(
+            f"ATTACH '{remove_engine_driver(pg_url)}' AS {pg_db_name} (TYPE POSTGRES)"
+        )
     except duckdb.BinderException as err:
         if f'database with name "{pg_db_name}" already exists' in str(err):
             logger.warning("Database is already attached: %s", pg_db_name)
