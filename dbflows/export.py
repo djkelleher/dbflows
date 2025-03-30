@@ -14,14 +14,9 @@ from fileflows import Files, S3Cfg, create_duckdb_secret, is_s3_path
 from fileflows.s3 import S3Cfg, is_s3_path
 from sqlalchemy.engine import Engine
 
-from dbflows.utils import (
-    compile_statement,
-    engine_url,
-    logger,
-    remove_engine_driver,
-    schema_table,
-    split_schema_table,
-)
+from dbflows.utils import (compile_statement, engine_url, logger,
+                           remove_engine_driver, schema_table,
+                           split_schema_table)
 
 from .duck import mount_pg_db
 
@@ -83,100 +78,6 @@ class ExportLocation:
         """
         self.files.create(self.save_path)
 
-
-@dataclass
-class ExportLocations:
-    def __init__(self, export_locations: Sequence[Union[str, ExportLocation]]):
-        """
-        Create ExportLocations from a sequence of str or ExportLocation objects.
-
-        Parameters
-        ----------
-        export_locations : Sequence[Union[str, ExportLocation]]
-            A sequence of str or ExportLocation objects. If a single string or
-            ExportLocation is passed instead of a sequence, it will be converted
-            to a sequence of one item.
-
-        Attributes
-        ----------
-        export_locations : List[ExportLocation]
-            A list of ExportLocation objects.
-        """
-        if not isinstance(export_locations, (list, tuple)):
-            export_locations = [export_locations]
-        self.export_locations = [
-            ExportLocation(loc) if isinstance(loc, str) else loc
-            for loc in export_locations
-        ]
-
-    def create(self):
-        """
-        Create all export locations (if they do not already exist).
-
-        This method loops over all ExportLocation objects in the export_locations
-        attribute and calls the create method on each of them, which will create
-        the necessary directories or paths for saving exported data, either locally
-        or on an S3 bucket.
-
-        Returns:
-            None
-        """
-        for loc in self.export_locations:
-            loc.create()
-
-    def file_type_locations(self) -> Dict[str, List[ExportLocation]]:
-        """
-        Return a dictionary mapping file types to a list of ExportLocation objects.
-
-        The returned dictionary has file types as keys (e.g. ".csv", ".parquet") and a
-        list of ExportLocation objects as values. The ExportLocation objects are
-        filtered by their file type, so if a ExportLocation has a file type of
-        ".csv", it will be included in the list of values for the ".csv" key.
-
-        Returns
-        -------
-        Dict[str, List[ExportLocation]]
-            A dictionary mapping file types to a list of ExportLocation objects.
-        """
-        ftl = defaultdict(list)
-        for loc in self.export_locations:
-            ftl[loc.save_path.suffix].append(loc)
-        return ftl
-
-    @staticmethod
-    def local_dirs(export_locations: Sequence[ExportLocation]):
-        """
-        Return a list of ExportLocation objects that are local directories.
-
-        Parameters
-        ----------
-        export_locations : Sequence[ExportLocation]
-            A sequence of ExportLocation objects.
-
-        Returns
-        -------
-        List[ExportLocation]
-            A list of ExportLocation objects that are local directories.
-        """
-        return [l for l in export_locations if not l.is_s3]
-
-    @staticmethod
-    def s3_dirs(export_locations: Sequence[ExportLocation]):
-        """
-        Return a list of ExportLocation objects that are S3 directories.
-
-        Parameters
-        ----------
-        export_locations : Sequence[ExportLocation]
-            A sequence of ExportLocation objects.
-
-        Returns
-        -------
-        List[ExportLocation]
-            A list of ExportLocation objects that are S3 directories.
-        """
-        return [l for l in export_locations if l.is_s3]
-
 @dataclass
 class Export:
     # A sequence of strings or ExportLocation objects representing the locations to save the exported table.
@@ -188,6 +89,8 @@ class Export:
     # Optional compression level for saving to a parquet file.
     compression_level: Optional[int] = None
 
+    def __post_init__(self):
+        self.export_locations = [ExportLocation(save_path=loc) if isinstance(loc, str) else loc for loc in self.export_locations]
 
     @property
     def to_copy(self) -> Union[str, sa.Table]:
@@ -232,7 +135,7 @@ class QueryExport(Export):
 
 
 @dataclass
-class TablePartitionExport:
+class TablePartitionExport(Export):
     """Copy the contents of a table to a file, partitioned by a column."""
     table: Union[str, sa.Table]
     partition_by: str
@@ -243,7 +146,7 @@ class TablePartitionExport:
 
 
 @dataclass
-class QueryPartitionExport:
+class QueryPartitionExport(Export):
     """Copy the results of a query to a file, partitioned by a column."""
     query: Union[str, sa.Select]
     partition_by: str
@@ -274,42 +177,42 @@ def run_export(export: Export):
     locations. If no local directories are specified, the table will be exported
     to a temporary file and then copied to all of the locations.
     """
-    # wrap the export locations in an ExportLocations object.
+    # Create all export locations (if they do not already exist).
+    for loc in export.export_locations:
+        loc.create()
     with NamedTemporaryFile() as tf:
-        # run for each file type (if multiple)
-        for locations in export.export_locations.file_type_locations.values():
-            # check if any save location is a local directory.
-            local_dirs = export.export_locations.local_dirs(locations)
-            if local_dirs:
-                # if there is a local directory, use it as the export location.
-                export_loc = local_dirs.pop(0)
-                # the rest of the locations are just for copying.
-                copy_locs = local_dirs + export.export_locations.s3_dirs(locations)
-            elif len(export.export_locations) > 1:
-                # if there is no local directory, export to a temporary file
-                # and then copy to all of the locations.
-                export_loc = tf
-                copy_locs = export.export_locations
-            else:
-                assert len(export.export_locations) == 1
-                # if there is only one location, use it as the export location.
-                export_loc = export.export_locations[0]
-                # there are no other locations to copy to.
-                copy_locs = []
-            # export the table to the export location.
-            _duckdb_copy(
-                to_copy=export.to_copy,
-                is_table=export.is_table,
-                save_path=export_loc.save_path,
-                pg_url=export.pg_url,
-                file_type=export.file_type,
-                partition_by=export.partition_by,
-                compression_level=export.compression_level,
-                s3_cfg=export_loc.s3_cfg,
-            )
-            # copy the exported file to the other locations.
-            for loc in copy_locs:
-                loc.files.copy(export_loc.save_path, loc.save_path)
+        # check if any save location is a local directory.
+        local_dirs = [l for l in export.export_locations if not l.is_s3]
+        if local_dirs:
+            # if there is a local directory, use it as the export location.
+            export_loc = local_dirs.pop(0)
+            # the rest of the locations are just for copying.
+            copy_locs = local_dirs + [l for l in export.export_locations if l.is_s3]
+        elif len(export.export_locations) > 1:
+            # if there is no local directory, export to a temporary file
+            # and then copy to all of the locations.
+            export_loc = tf
+            copy_locs = export.export_locations
+        else:
+            assert len(export.export_locations) == 1
+            # if there is only one location, use it as the export location.
+            export_loc = export.export_locations[0]
+            # there are no other locations to copy to.
+            copy_locs = []
+        # export the table to the export location.
+        _duckdb_copy(
+            to_copy=export.to_copy,
+            is_table=export.is_table,
+            save_path=export_loc.save_path,
+            pg_url=export.pg_url,
+            file_type=export.file_type,
+            partition_by=export.partition_by,
+            compression_level=export.compression_level,
+            s3_cfg=export_loc.s3_cfg,
+        )
+        # copy the exported file to the other locations.
+        for loc in copy_locs:
+            loc.files.copy(export_loc.save_path, loc.save_path)
 
 
 def _duckdb_copy(
