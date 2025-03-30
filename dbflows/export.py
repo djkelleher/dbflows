@@ -1,22 +1,27 @@
 import os
 import re
-from collections import defaultdict
+from collections.abc import Sequence as ABCSequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from subprocess import run
 from tempfile import NamedTemporaryFile
-from typing import Dict, List, Literal, Optional, Sequence, Union
+from typing import Any, Dict, List, Literal, Optional, Sequence, Union
 
 import duckdb
 import sqlalchemy as sa
 from fileflows import Files, S3Cfg, create_duckdb_secret, is_s3_path
-from fileflows.s3 import S3Cfg, is_s3_path
+from pydantic import BaseModel, PrivateAttr, field_validator, model_validator
 from sqlalchemy.engine import Engine
 
-from dbflows.utils import (compile_statement, engine_url, logger,
-                           remove_engine_driver, schema_table,
-                           split_schema_table)
+from dbflows.utils import (
+    compile_statement,
+    engine_url,
+    logger,
+    remove_engine_driver,
+    schema_table,
+    split_schema_table,
+)
 
 from .duck import mount_pg_db
 
@@ -26,11 +31,11 @@ class ExportLocation:
     """Location to save export data file to."""
 
     save_path: Union[Path, str]
-    # S3 credentials (if save_loc is an S3  path)
+    # S3 credentials (if save_path is an S3  path)
     s3_cfg: Optional[S3Cfg] = None
 
     def __post_init__(self):
-        self.save_loc = str(self.save_loc)
+        self.save_path = str(self.save_path)
         self.files = Files(s3_cfg=self.s3_cfg)
 
     @classmethod
@@ -38,7 +43,7 @@ class ExportLocation:
         cls,
         table: str,
         file_type: Literal["csv", "csv.gz", "parquet"],
-        save_loc: Union[Path, str],
+        save_path: Union[Path, str],
         s3_cfg: Optional[S3Cfg] = None,
     ):
         """
@@ -47,14 +52,14 @@ class ExportLocation:
         Args:
             table (str): The name of the table to export.
             file_type (Literal["csv", "csv.gz", "parquet"]): The type of file to save the data as.
-            save_loc (Union[Path, str]): The location (path or URL) to save the exported file.
+            save_path (Union[Path, str]): The location (path or URL) to save the exported file.
             s3_cfg (Optional[S3Cfg]): Optional S3 configuration for saving to an S3 bucket.
 
         Returns:
             ExportLocation: An instance of ExportLocation with the specified parameters.
         """
         file_name = "/".join(split_schema_table(schema_table(table))) + f".{file_type}"
-        return cls(save_path=f"{save_loc}/{file_name}", s3_cfg=s3_cfg)
+        return cls(save_path=f"{save_path}/{file_name}", s3_cfg=s3_cfg)
 
     @property
     def is_s3(self) -> bool:
@@ -78,8 +83,9 @@ class ExportLocation:
         """
         self.files.create(self.save_path)
 
-@dataclass
-class Export:
+
+class Export(BaseModel):
+    """Base class for all export operations."""
     # A sequence of strings or ExportLocation objects representing the locations to save the exported table.
     export_locations: Sequence[Union[str, ExportLocation]]
     # The PostgreSQL connection URL.
@@ -88,9 +94,19 @@ class Export:
     file_type: Optional[Literal["csv", "parquet"]] = None
     # Optional compression level for saving to a parquet file.
     compression_level: Optional[int] = None
+    
+    model_config = {
+        "arbitrary_types_allowed": True  # To allow SQLAlchemy types
+    }
 
-    def __post_init__(self):
-        self.export_locations = [ExportLocation(save_path=loc) if isinstance(loc, str) else loc for loc in self.export_locations]
+    @field_validator('export_locations')
+    def process_export_locations(cls, export_locations: Any) -> Sequence[ExportLocation]:
+        # Handle non-sequence input (single string or ExportLocation)
+        if not isinstance(export_locations, (list, tuple)):
+            export_locations = [export_locations]
+        
+        # Convert strings to ExportLocation objects
+        return [ExportLocation(save_path=loc) if isinstance(loc, str) else loc for loc in export_locations]
 
     @property
     def to_copy(self) -> Union[str, sa.Table]:
@@ -109,55 +125,106 @@ class Export:
         raise NotImplementedError(
             f"is_table must be implemented in {self.__class__.__name__}"
         )
-    
 
-@dataclass
+
 class TableExport(Export):
     """Copy a database table to a file."""
     # The table or schema-qualified table name to export data from.
     table: Union[str, sa.Table]
+    _is_table: bool = PrivateAttr(True)
+    _to_copy: Union[str, sa.Table] = PrivateAttr(None)
+    _partition_by: Optional[str] = PrivateAttr(None)
+    
+    @model_validator(mode='after')
+    def setup_fields(self) -> 'TableExport':
+        self._to_copy = self.table
+        return self
 
-    def __post_init__(self):
-        self.is_table=True
-        self.to_copy=self.table
-        self.partition_by = None
+    @property
+    def is_table(self) -> bool:
+        return self._is_table
 
-@dataclass
+    @property
+    def to_copy(self) -> Union[str, sa.Table]:
+        return self._to_copy
+
+    @property
+    def partition_by(self) -> Optional[str]:
+        return self._partition_by
+
+
 class QueryExport(Export):
-    """"Copy the results of a query to a file."""
+    """Copy the results of a query to a file."""
     # SQL query or sqlalchemy Select object.
     query: Union[str, sa.Select]
+    table_name: str  # Required for _compile_query
+    _is_table: bool = PrivateAttr(False)
+    _to_copy: Union[str, sa.Table] = PrivateAttr(None)
+    _partition_by: Optional[str] = PrivateAttr(None)
+    
+    @model_validator(mode='after')
+    def setup_fields(self) -> 'QueryExport':
+        self._to_copy = _compile_query(self.query, self.pg_url, self.table_name)
+        return self
 
-    def __post_init__(self):
-        self.is_table=False
-        self.to_copy=_compile_query(self.query, self.pg_url, self.table_name)
-        self.partition_by = None
+    @property
+    def is_table(self) -> bool:
+        return self._is_table
+
+    @property
+    def to_copy(self) -> Union[str, sa.Table]:
+        return self._to_copy
+
+    @property
+    def partition_by(self) -> Optional[str]:
+        return self._partition_by
 
 
-@dataclass
 class TablePartitionExport(Export):
     """Copy the contents of a table to a file, partitioned by a column."""
     table: Union[str, sa.Table]
     partition_by: str
+    _is_table: bool = PrivateAttr(True)
+    _to_copy: Union[str, sa.Table] = PrivateAttr(None)
+    
+    @model_validator(mode='after')
+    def setup_fields(self) -> 'TablePartitionExport':
+        self._to_copy = self.table
+        return self
 
-    def __post_init__(self):
-        self.is_table=True
-        self.to_copy=self.table
+    @property
+    def is_table(self) -> bool:
+        return self._is_table
+
+    @property
+    def to_copy(self) -> Union[str, sa.Table]:
+        return self._to_copy
 
 
-@dataclass
 class QueryPartitionExport(Export):
     """Copy the results of a query to a file, partitioned by a column."""
     query: Union[str, sa.Select]
     partition_by: str
+    table_name: str  # Required for _compile_query
+    _is_table: bool = PrivateAttr(False)
+    _to_copy: Union[str, sa.Table] = PrivateAttr(None)
+    
+    @model_validator(mode='after')
+    def setup_fields(self) -> 'QueryPartitionExport':
+        self._to_copy = _compile_query(self.query, self.pg_url, self.table_name)
+        return self
 
-    def __post_init__(self):
-        self.is_table=False
-        self.to_copy=_compile_query(self.query, self.pg_url, self.table_name)
+    @property
+    def is_table(self) -> bool:
+        return self._is_table
+
+    @property
+    def to_copy(self) -> Union[str, sa.Table]:
+        return self._to_copy
 
 
 def run_exports(exports: List[Export], n_workers: Optional[int] = None):
-    n_workers = n_workers or max(os.cpu_count()*0.5,1)
+    n_workers = n_workers or max(os.cpu_count() // 2, 1)
     logger.info("Running %i exports with %i workers", len(exports), n_workers)
     with ThreadPoolExecutor(max_workers=n_workers) as executor:
         executor.map(run_export, exports)
@@ -288,7 +355,7 @@ def _compile_query(query: str, pg_db: str, table_name: str) -> str:
     str
         The modified query string.
     """
-    pg_db_name = pg_db.split("/")
+    pg_db_name = pg_db.split("/")[-1] if "/" in pg_db else pg_db
     if isinstance(query, sa.Select):
         # If the query is a sqlalchemy Select object, convert it to a string
         query = compile_statement(query)
