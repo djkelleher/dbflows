@@ -14,14 +14,9 @@ from fileflows import Files, S3Cfg, create_duckdb_secret, is_s3_path
 from pydantic import BaseModel, PrivateAttr, field_validator, model_validator
 from sqlalchemy.engine import Engine
 
-from dbflows.utils import (
-    compile_statement,
-    engine_url,
-    logger,
-    remove_engine_driver,
-    schema_table,
-    split_schema_table,
-)
+from dbflows.utils import (compile_statement, engine_url, logger,
+                           remove_engine_driver, schema_table,
+                           split_schema_table)
 
 from .duck import mount_pg_db
 
@@ -70,6 +65,15 @@ class ExportLocation:
             bool: True if the export location is an S3 path, False otherwise.
         """
         return is_s3_path(self.save_path)
+    
+    def exists(self) -> bool:
+        """
+        Check if the export location file exists.
+
+        Returns:
+            bool: True if the file exists, False otherwise.
+        """
+        return self.files.exists(self.save_path)
 
     def create(self):
         """
@@ -87,13 +91,17 @@ class ExportLocation:
 class Export(BaseModel):
     """Base class for all export operations."""
     # A sequence of strings or ExportLocation objects representing the locations to save the exported table.
-    export_locations: Sequence[Union[str, ExportLocation]]
+    export_locations: Union[Union[str, ExportLocation],Sequence[Union[str, ExportLocation]]]
     # The PostgreSQL connection URL.
     pg_url: str
     # The type of file to save the data as. If not specified, the file type will be determined by the file extension of the first export location.
     file_type: Optional[Literal["csv", "parquet"]] = None
     # Optional compression level for saving to a parquet file.
     compression_level: Optional[int] = None
+    # private internal vars.
+    _is_table: bool = PrivateAttr(None)
+    _to_copy: Union[str, sa.Table] = PrivateAttr(None)
+    _partition_by: Optional[str] = PrivateAttr(None)
     
     model_config = {
         "arbitrary_types_allowed": True  # To allow SQLAlchemy types
@@ -108,49 +116,17 @@ class Export(BaseModel):
         # Convert strings to ExportLocation objects
         return [ExportLocation(save_path=loc) if isinstance(loc, str) else loc for loc in export_locations]
 
-    @property
-    def to_copy(self) -> Union[str, sa.Table]:
-        raise NotImplementedError(
-            f"to_copy must be implemented in {self.__class__.__name__}"
-        )
-
-    @property
-    def partition_by(self) -> Optional[str]:
-        raise NotImplementedError(
-            f"partition_by must be implemented in {self.__class__.__name__}"
-        )
-
-    @property
-    def is_table(self) -> bool:
-        raise NotImplementedError(
-            f"is_table must be implemented in {self.__class__.__name__}"
-        )
-
 
 class TableExport(Export):
     """Copy a database table to a file."""
     # The table or schema-qualified table name to export data from.
     table: Union[str, sa.Table]
-    _is_table: bool = PrivateAttr(True)
-    _to_copy: Union[str, sa.Table] = PrivateAttr(None)
-    _partition_by: Optional[str] = PrivateAttr(None)
-    
+
     @model_validator(mode='after')
-    def setup_fields(self) -> 'TableExport':
+    def setup_fields(self):
+        self._is_table = True
         self._to_copy = self.table
         return self
-
-    @property
-    def is_table(self) -> bool:
-        return self._is_table
-
-    @property
-    def to_copy(self) -> Union[str, sa.Table]:
-        return self._to_copy
-
-    @property
-    def partition_by(self) -> Optional[str]:
-        return self._partition_by
 
 
 class QueryExport(Export):
@@ -158,69 +134,38 @@ class QueryExport(Export):
     # SQL query or sqlalchemy Select object.
     query: Union[str, sa.Select]
     table_name: str  # Required for _compile_query
-    _is_table: bool = PrivateAttr(False)
-    _to_copy: Union[str, sa.Table] = PrivateAttr(None)
-    _partition_by: Optional[str] = PrivateAttr(None)
-    
+
     @model_validator(mode='after')
-    def setup_fields(self) -> 'QueryExport':
+    def setup_fields(self):
+        self._is_table = False
         self._to_copy = _compile_query(self.query, self.pg_url, self.table_name)
         return self
-
-    @property
-    def is_table(self) -> bool:
-        return self._is_table
-
-    @property
-    def to_copy(self) -> Union[str, sa.Table]:
-        return self._to_copy
-
-    @property
-    def partition_by(self) -> Optional[str]:
-        return self._partition_by
-
 
 class TablePartitionExport(Export):
     """Copy the contents of a table to a file, partitioned by a column."""
     table: Union[str, sa.Table]
     partition_by: str
-    _is_table: bool = PrivateAttr(True)
-    _to_copy: Union[str, sa.Table] = PrivateAttr(None)
-    
+
     @model_validator(mode='after')
-    def setup_fields(self) -> 'TablePartitionExport':
+    def setup_fields(self):
+        self._is_table = True
         self._to_copy = self.table
+        self._partition_by = self.partition_by
         return self
-
-    @property
-    def is_table(self) -> bool:
-        return self._is_table
-
-    @property
-    def to_copy(self) -> Union[str, sa.Table]:
-        return self._to_copy
 
 
 class QueryPartitionExport(Export):
     """Copy the results of a query to a file, partitioned by a column."""
     query: Union[str, sa.Select]
     partition_by: str
-    table_name: str  # Required for _compile_query
-    _is_table: bool = PrivateAttr(False)
-    _to_copy: Union[str, sa.Table] = PrivateAttr(None)
+    table_name: str
     
     @model_validator(mode='after')
-    def setup_fields(self) -> 'QueryPartitionExport':
+    def setup_fields(self):
+        self._is_table = False
         self._to_copy = _compile_query(self.query, self.pg_url, self.table_name)
+        self._partition_by = self.partition_by
         return self
-
-    @property
-    def is_table(self) -> bool:
-        return self._is_table
-
-    @property
-    def to_copy(self) -> Union[str, sa.Table]:
-        return self._to_copy
 
 
 def run_exports(exports: List[Export], n_workers: Optional[int] = None):
@@ -268,12 +213,12 @@ def run_export(export: Export):
             copy_locs = []
         # export the table to the export location.
         _duckdb_copy(
-            to_copy=export.to_copy,
-            is_table=export.is_table,
+            to_copy=export._to_copy,
+            is_table=export._is_table,
             save_path=export_loc.save_path,
             pg_url=export.pg_url,
             file_type=export.file_type,
-            partition_by=export.partition_by,
+            partition_by=export._partition_by,
             compression_level=export.compression_level,
             s3_cfg=export_loc.s3_cfg,
         )
@@ -293,7 +238,7 @@ def _duckdb_copy(
     s3_cfg: Optional[S3Cfg] = None,
 ):
     # Get the name of the PostgreSQL database
-    pg_db_name = mount_pg_db(pg_url)
+    pg_db_name = pg_url.split("/")[-1]
 
     # If we're copying a table, prepend the database name to the table name
     if is_table:
@@ -327,6 +272,7 @@ def _duckdb_copy(
 
     # Connect to the DuckDB database
     with duckdb.connect() as conn:
+        mount_pg_db(pg_url=pg_url, conn=conn)
         # If we're saving to an S3 bucket, create the necessary secret
         if is_s3_path(save_path):
             create_duckdb_secret(s3_cfg, conn=conn)
