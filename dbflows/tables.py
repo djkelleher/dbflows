@@ -36,14 +36,6 @@ def format_table_name(name: str) -> str:
         table = table.replace(metric, abbr)
     return table
 
-
-# TODO HypterTable
-# SELECT add_compression_policy('table name', INTERVAL '7 days');
-# ALTER TABLE td_ameritrade.option_payloads_tz SET (timescaledb.compress, timescaledb.compress_orderby = 'updated DESC');
-# https://docs.postgres.com/timescaledb/latest/how-to-guides/compression/about-compression/
-# https://docs.timescale.com/api/latest/compression/
-
-
 async def drop_table(conn: PgConn, table: str | sa.Table, cascade: bool = True):
     if not isinstance(table,str):
         table = schema_table(table)
@@ -172,16 +164,18 @@ async def create_tables(
 
 
 async def create_hypertable(conn, table: Union[sa.Table, DeclarativeMeta]) -> None:
-    # TODO secondary partition as comment pattern.
-    """Create a hypertable partition if table or entity has a column that is flagged as a hypertable partition column.
+    """
+    Create a TimescaleDB hypertable partition if table or entity has a column that is flagged as a hypertable partition column.
+
     For numeric columns, hypertable partitions should be specify the unit of the values in the column (seconds, miliseconds, microseconds, nanoseconds),
-    e.g. `hypertable-partition (miliseconds, 14 days)`.
+    e.g. comment="hypertable-partition (1 day), compress_after_days 1, drop_after_days 3 "
     For datetime columns, only the number of days needs to be specified: e.g. `hypertable-partition (14 days)`
 
     Args:
         table (Union[sa.Table, DeclarativeMeta]): The entity or table that should be checked.
     """
     table = to_table(table)
+    table_name  = schema_table(table) 
     # find hypertable time column.
     second_scalars = {
         "seconds": 10**0,
@@ -189,32 +183,52 @@ async def create_hypertable(conn, table: Union[sa.Table, DeclarativeMeta]) -> No
         "microseconds": 10**6,
         "nanoseconds": 10**9,
     }
-    time_column, chunk_time_interval = None, None
+    # this variable will hold the name of the time column.
+    time_column = None
+    # loop over all columns of the table.
     for col_name, col in table.columns.items():
+        # if the column has a comment, check if it matches the regular expression for a hypertable time column.
         if col.comment and (
             partition_cfg := re.search(
                 r"(?i)hypertable[\s_-]partition\s?\((?:((?:mili|micro|nano)?seconds),)?\s?(\d{1,4})\s?(?:d|days?)\)",
                 col.comment,
             )
         ):
+            # if we have already found a time column, raise an error.
             if time_column is not None:
                 raise ValueError(
                     "Multiple hypertable time columns found. Can not resolve configuration."
                 )
+            # remember the name of the time column.
             time_column = col_name
+            # get the number of days from the regular expression match.
             chunk_days = partition_cfg.group(2)
+            # if the regular expression matched a time unit (miliseconds, microseconds, nanoseconds), convert it to seconds.
             if int_time_unit := partition_cfg.group(1):
+                # convert the interval to an integer of seconds.
                 chunk_time_interval = (
                     86_400 * second_scalars[int_time_unit] * int(chunk_days)
                 )
             else:
+                # if the regular expression didn't match a time unit, just use the number of days as an interval.
                 chunk_time_interval = f"INTERVAL '{chunk_days} days'"
-
-    if time_column:
-        schema = table.schema or "public"
-        statement = f"SELECT create_hypertable('{schema}.{table.name}', '{time_column}', chunk_time_interval => {chunk_time_interval})"
-        logger.info(
-            "Creating hypertable partition: %s.",
-            statement,
-        )
+            if drop_after_days := re.search(r"drop_after_days\s*(\d+)", col.comment):
+                drop_after_days = drop_after_days.group(1)
+            compress_after_days = re.search(r"compress_after_days\s*(\d+)", col.comment)
+            if compress_after_days:
+                compress_after_days = compress_after_days.group(1)
+    # if a time column was found, create a hypertable partition.
+    if time_column and chunk_time_interval:
+        statement = f"SELECT create_hypertable('{table_name}', '{time_column}', chunk_time_interval => {chunk_time_interval})"
+        logger.info("Creating hypertable partition: %s.",statement)
         await conn.execute(sa.text(statement))
+        if drop_after_days:
+            logger.info("Dropping hypertable chunks after %s days", drop_after_days)
+            await conn.execute(sa.text(f"SELECT drop_chunks('{table_name}', INTERVAL '{drop_after_days} days')"))
+        if compress_after_days:
+            logger.info("Adding compression policy to compress after %s days.",compress_after_days)
+            await conn.execute(sa.text(f"""ALTER TABLE {table_name} SET (
+                timescaledb.compress,
+                timescaledb.compress_orderby = '{time_column} DESC'
+            );"""))
+            await conn.execute(sa.text(f"SELECT add_compression_policy('{table_name}', INTERVAL '{compress_after_days} days');"))
